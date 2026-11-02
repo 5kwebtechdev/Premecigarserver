@@ -8,6 +8,7 @@ import {
   idParamSchema,
   listSubscriptionsSchema,
   subscribeSchema,
+  signupIntentSchema,
   pauseSchema,
   cancelSchema,
   updateSubscriptionSchema,
@@ -22,6 +23,7 @@ router.use(authenticate);
 router.get('/metrics', authorize(...ADMIN_ROLES), subscriptionController.metrics);
 
 // ── Customer: self-service ────────────────────────────────
+router.post('/intent', validate(signupIntentSchema), subscriptionController.signupIntent);
 router.post('/', validate(subscribeSchema), subscriptionController.subscribe);
 router.get('/me', subscriptionController.listMine);
 router.get('/me/:id', validate(idParamSchema), subscriptionController.getMine);

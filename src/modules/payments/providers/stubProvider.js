@@ -8,6 +8,8 @@ import { logger } from '../../../utils/logger.js';
 // StripeProvider (or similar) implementing the same PaymentProvider
 // interface once the client confirms a gateway.
 export class StubPaymentProvider extends PaymentProvider {
+  name = 'stub';
+
   async createCustomer(user) {
     const providerCustomerId = `stub_cus_${crypto.randomUUID()}`;
     logger.info(`[stubProvider] createCustomer for user ${user.id} -> ${providerCustomerId}`);

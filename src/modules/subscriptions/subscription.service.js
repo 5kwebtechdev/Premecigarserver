@@ -16,7 +16,8 @@ import {
 import { notify } from '../notifications/notification.service.js';
 import { subscriptionWelcomeEmail } from '../notifications/email.templates.js';
 import * as addressService from '../addresses/address.service.js';
-import { paymentProvider } from '../payments/providers/stubProvider.js';
+import { membershipPaymentProvider as paymentProvider, stripeEnabled } from '../payments/providers/index.js';
+import { env } from '../../config/env.js';
 import { computeNextBillingDate, monthlyEquivalentPrice, assertTransition } from './subscription.lifecycle.js';
 
 const planInclude = {
@@ -145,20 +146,45 @@ export async function subscribe(userId, dto) {
   }
 
   const amount = Number(plan.price);
-  const { providerCustomerId } = await paymentProvider.createCustomer(user);
-  const charge = await paymentProvider.charge(Math.round(amount * 100), providerCustomerId, {
-    kind: 'subscription_signup',
-    userId,
-    planId: plan.id,
-    idempotencyKey: `signup_${userId}_${plan.id}`,
-  });
-  if (!charge.success) {
-    throw ApiError.badRequest('Your payment was declined. Please try a different payment method.');
+  let providerCustomerId;
+  let charge;
+  let paymentMethodLabel = dto.paymentMethod?.label || labelFromType(dto.paymentMethod?.type);
+
+  if (stripeEnabled) {
+    // The browser already paid via Stripe.js; verify that payment server-side.
+    if (!dto.paymentIntentId) throw ApiError.badRequest('Payment is required to join');
+    if (!user.stripeCustomerId) throw ApiError.badRequest('Start checkout again to join');
+    providerCustomerId = user.stripeCustomerId;
+    try {
+      const verified = await paymentProvider.verifySignupIntent(dto.paymentIntentId, {
+        providerCustomerId,
+        amountCents: Math.round(amount * 100),
+        metadata: { kind: 'subscription_signup', userId, planId: plan.id },
+      });
+      charge = { success: true, providerRef: verified.providerRef };
+      paymentMethodLabel = verified.paymentMethodLabel;
+    } catch (err) {
+      logger.warn(`[subscriptions] stripe signup verification failed for user ${userId}: ${err.message}`);
+      throw ApiError.badRequest('We could not confirm your payment. Please try again.');
+    }
+    // A reused intent must not create a second membership.
+    const reused = await prisma.subscriptionPayment.findFirst({ where: { providerRef: charge.providerRef } });
+    if (reused) throw ApiError.conflict('That payment has already been used');
+  } else {
+    ({ providerCustomerId } = await paymentProvider.createCustomer(user));
+    charge = await paymentProvider.charge(Math.round(amount * 100), providerCustomerId, {
+      kind: 'subscription_signup',
+      userId,
+      planId: plan.id,
+      idempotencyKey: `signup_${userId}_${plan.id}`,
+    });
+    if (!charge.success) {
+      throw ApiError.badRequest('Your payment was declined. Please try a different payment method.');
+    }
   }
 
   const now = new Date();
   const nextBillingDate = computeNextBillingDate(now, plan.billingFrequency);
-  const paymentMethodLabel = dto.paymentMethod?.label || labelFromType(dto.paymentMethod?.type);
 
   const created = await prisma.$transaction(async (tx) => {
     const subscription = await tx.subscription.create({
@@ -189,7 +215,7 @@ export async function subscribe(userId, dto) {
     await tx.payment.create({
       data: {
         subscriptionPaymentId: subPayment.id,
-        provider: 'stub',
+        provider: paymentProvider.name,
         providerRef: charge.providerRef,
         amount,
         status: PAYMENT_STATUS.SUCCEEDED,
@@ -232,6 +258,37 @@ export async function subscribe(userId, dto) {
   }).catch((err) => logger.error(`[subscriptions] welcome email failed for ${user.email}`, err));
 
   return { subscription: shapeCustomer(subscription), order };
+}
+
+// Stripe signup step 1: create the PaymentIntent the browser will confirm.
+// Re-checks the plan/ownership rules so nobody pays for a join that would 409.
+export async function createSignupIntent(userId, planId) {
+  if (!stripeEnabled) throw ApiError.badRequest('Online card payments are not enabled');
+  const plan = await prisma.membershipPlan.findUnique({ where: { id: planId } });
+  if (!plan || !plan.isActive || !plan.productId) throw ApiError.badRequest('That membership plan is not available');
+
+  const existing = await prisma.subscription.findFirst({
+    where: { userId, status: { in: NON_TERMINAL_SUBSCRIPTION_STATUSES } },
+    include: { plan: { select: { name: true } } },
+  });
+  if (existing) {
+    throw ApiError.conflict(
+      `You already have a ${existing.plan.name} membership. Change or cancel it before joining another plan.`
+    );
+  }
+
+  let user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user.stripeCustomerId) {
+    const { providerCustomerId } = await paymentProvider.createCustomer(user);
+    user = await prisma.user.update({ where: { id: userId }, data: { stripeCustomerId: providerCustomerId } });
+  }
+
+  const { clientSecret, paymentIntentId } = await paymentProvider.createSignupIntent(
+    Math.round(Number(plan.price) * 100),
+    user.stripeCustomerId,
+    { kind: 'subscription_signup', userId, planId: plan.id }
+  );
+  return { clientSecret, paymentIntentId, publishableKey: env.stripePublishableKey };
 }
 
 function labelFromType(type) {

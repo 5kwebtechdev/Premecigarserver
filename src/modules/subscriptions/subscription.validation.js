@@ -36,6 +36,7 @@ export const subscribeSchema = z.object({
       shipToBilling: z.coerce.boolean().optional().default(true),
       shippingAddressId: z.coerce.number().int().positive().optional(),
       shippingAddress: addressInput.optional(),
+      paymentIntentId: z.string().startsWith('pi_').optional(),
       paymentMethod: z
         .object({
           type: z.enum(['card', 'paypal', 'applepay']).optional(),
@@ -59,7 +60,11 @@ export const subscribeSchema = z.object({
     }),
 });
 
-export const pauseSchema = z.object({
+export const signupIntentSchema = z.object({
+  body: z.object({ planId: z.coerce.number().int().positive() }),
+});
+
+export const pauseSchema =z.object({
   params: z.object({ id: z.coerce.number().int().positive() }),
   body: z.object({ resumeAt: z.string().datetime().optional() }).optional().default({}),
 });

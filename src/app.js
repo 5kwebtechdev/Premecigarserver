@@ -8,6 +8,7 @@ import morgan from 'morgan';
 
 import { env } from './config/env.js';
 import routes from './routes/index.js';
+import * as paymentController from './modules/payments/payment.controller.js';
 import { notFound } from './middleware/notFound.js';
 import { errorHandler } from './middleware/errorHandler.js';
 
@@ -34,6 +35,10 @@ export function createApp() {
       setHeaders: (res) => res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin'),
     })
   );
+
+  // Stripe signs the exact request bytes, so the webhook must see the raw body
+  // before express.json() parses it.
+  app.post(`${env.apiPrefix}/payments/webhook`, express.raw({ type: '*/*' }), paymentController.webhook);
 
   app.use(express.json());
   app.use(cookieParser());

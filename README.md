@@ -31,7 +31,7 @@ This is a standalone Node project — no monorepo/workspaces tooling. `cd server
    ```
    npm run dev
    ```
-   API is served at `http://localhost:4000/api/v1`. Try `GET /api/v1/health`.
+   API is served at `http://129.121.143.200:4000/api/v1`. Try `GET /api/v1/health`.
 
 ## What's implemented vs. stubbed
 

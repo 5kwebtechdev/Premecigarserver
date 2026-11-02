@@ -26,6 +26,9 @@ model User {
   phone        String?
   role         Role    @default(CUSTOMER)
 
+  // Stripe Customer id (cus_...). Created lazily on first membership signup.
+  stripeCustomerId String? @unique
+
   emailVerified           Boolean   @default(false)
   emailVerifyTokenHash    String?
   emailVerifyTokenExpires DateTime?

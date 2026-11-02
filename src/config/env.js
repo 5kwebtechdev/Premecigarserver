@@ -43,6 +43,11 @@ export const env = {
   serverPublicUrl:
     process.env.SERVER_PUBLIC_URL || `http://localhost:${Number(process.env.PORT || 4000)}`,
 
+  // --- Stripe (memberships). Blank secret key = memberships use the stub provider. ---
+  stripeSecretKey: process.env.STRIPE_SECRET_KEY || '',
+  stripePublishableKey: process.env.STRIPE_PUBLISHABLE_KEY || '',
+  stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
+
   // --- Recurring billing ---
   billingMaxFailedPayments: Number(process.env.BILLING_MAX_FAILED_PAYMENTS || 3),
   renewalReminderDays: Number(process.env.RENEWAL_REMINDER_DAYS || 3),

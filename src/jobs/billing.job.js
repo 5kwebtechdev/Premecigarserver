@@ -2,7 +2,7 @@ import { prisma } from '../config/db.js';
 import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { notify } from '../modules/notifications/notification.service.js';
-import { paymentProvider } from '../modules/payments/providers/stubProvider.js';
+import { membershipPaymentProvider as paymentProvider } from '../modules/payments/providers/index.js';
 import { createShipmentOrder } from '../modules/subscriptions/subscription.service.js';
 import { computeNextBillingDate } from '../modules/subscriptions/subscription.lifecycle.js';
 import {
@@ -115,7 +115,7 @@ async function billOne(sub, now) {
   const amount = Number(plan.price);
   const charge = await paymentProvider.charge(
     Math.round(amount * 100),
-    sub.providerCustomerId ?? 'stub_cus_missing',
+    sub.providerCustomerId ?? 'cus_missing',
     {
       kind: 'subscription_renewal',
       subscriptionId: sub.id,
@@ -139,7 +139,7 @@ async function billOne(sub, now) {
       await tx.payment.create({
         data: {
           subscriptionPaymentId: subPayment.id,
-          provider: 'stub',
+          provider: paymentProvider.name,
           providerRef: charge.providerRef,
           amount,
           status: PAYMENT_STATUS.SUCCEEDED,

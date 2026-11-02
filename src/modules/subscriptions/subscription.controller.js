@@ -7,6 +7,10 @@ export const subscribe = asyncHandler(async (req, res) => {
   res.status(201).json(result);
 });
 
+export const signupIntent = asyncHandler(async (req, res) => {
+  res.json(await subscriptionService.createSignupIntent(req.user.id, req.body.planId));
+});
+
 export const listMine = asyncHandler(async (req, res) => {
   res.json(await subscriptionService.listMine(req.user.id));
 });
