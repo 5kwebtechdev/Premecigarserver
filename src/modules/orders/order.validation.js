@@ -30,6 +30,8 @@ const addressInput = z.object({
 export const checkoutSchema = z.object({
   body: z
     .object({
+      // Purchases only happen through a members-only event.
+      eventId: z.coerce.number().int().positive(),
       items: z
         .array(
           z.object({

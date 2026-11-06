@@ -137,6 +137,7 @@ model Product {
   cartItems       CartItem[]
   orderItems      OrderItem[]
   membershipPlans MembershipPlan[]  @relation("PlanShipmentProduct")
+  eventProducts   EventProduct[]
 
   @@map("products")
 }
@@ -326,9 +327,11 @@ model Order {
   shippingAddressId Int?
   billingAddressId  Int?
   subscriptionId    Int?
+  eventId           Int?
   trackingNumber    String?
   placedAt          DateTime    @default(now())
 
+  event           Event?               @relation(fields: [eventId], references: [id], onDelete: SetNull)
   user            User                 @relation(fields: [userId], references: [id])
   shippingAddress Address?             @relation("ShippingAddress", fields: [shippingAddressId], references: [id])
   billingAddress  Address?             @relation("BillingAddress", fields: [billingAddressId], references: [id])
@@ -448,7 +451,27 @@ model Event {
   isPublished Boolean   @default(false)
   createdAt   DateTime  @default(now())
 
+  // Members-only sale: the products listed here can be bought at
+  // `discountPercent` off, but only by an active member and only while the
+  // event is on (see orders checkout).
+  discountPercent Decimal @default(0) @db.Decimal(5, 2)
+
+  products EventProduct[]
+  orders   Order[]
+
   @@map("events")
+}
+
+model EventProduct {
+  eventId   Int
+  productId Int
+
+  event   Event   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@id([eventId, productId])
+  @@index([productId])
+  @@map("event_products")
 }
 
 // ─────────────────────────────────────────────────────────

@@ -10,6 +10,9 @@ export const createEventSchema = z.object({
     endAt: z.coerce.date().optional().nullable(),
     imageUrl: z.string().url().optional().or(z.literal('')),
     isPublished: z.coerce.boolean().optional(),
+    // Member price = product price minus this percentage.
+    discountPercent: z.coerce.number().min(0).max(100).optional(),
+    productIds: z.array(z.coerce.number().int().positive()).optional(),
   }),
 });
 

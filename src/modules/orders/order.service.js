@@ -8,7 +8,9 @@ import {
   PAYMENT_STATUS,
   PURCHASABLE_PRODUCT_TYPES,
   NOTIFICATION_TYPE,
+  SUBSCRIPTION_STATUS,
 } from '../../config/constants.js';
+import { isSaleOpen } from '../events/event.service.js';
 import { notify } from '../notifications/notification.service.js';
 import { orderConfirmationEmail } from '../notifications/email.templates.js';
 import * as addressService from '../addresses/address.service.js';
@@ -69,6 +71,26 @@ export async function getMineById(userId, id) {
 // subscription engine — this path never creates a subscription.
 // ─────────────────────────────────────────────────────────
 export async function checkout(userId, dto) {
+  // 0. Products are only sold at members-only events: the buyer needs an
+  // active membership, and the event must be on today.
+  const event = await prisma.event.findUnique({
+    where: { id: Number(dto.eventId) },
+    include: { products: { select: { productId: true } } },
+  });
+  if (!event || !event.isPublished) throw ApiError.notFound('Event not found');
+  if (!isSaleOpen(event)) {
+    throw ApiError.forbidden('Products can only be bought on the day of the event');
+  }
+  const membership = await prisma.subscription.findFirst({
+    where: { userId, status: SUBSCRIPTION_STATUS.ACTIVE },
+    select: { id: true },
+  });
+  if (!membership) {
+    throw ApiError.forbidden('You need an active membership to buy products. Join a plan to continue.');
+  }
+  const eventProductIds = new Set(event.products.map((p) => p.productId));
+  const discountPercent = Number(event.discountPercent);
+
   // 1. Load + validate every line against the catalog.
   const ids = [...new Set(dto.items.map((i) => Number(i.productId)))];
   const products = await prisma.product.findMany({
@@ -81,6 +103,9 @@ export async function checkout(userId, dto) {
     const product = byId.get(Number(line.productId));
     if (!product) throw ApiError.badRequest(`Product ${line.productId} was not found`);
     if (!product.isActive) throw ApiError.badRequest(`${product.name} is no longer available`);
+    if (!eventProductIds.has(product.id)) {
+      throw ApiError.badRequest(`${product.name} isn't part of this event`);
+    }
     if (!PURCHASABLE_PRODUCT_TYPES.includes(product.type)) {
       throw ApiError.badRequest(`${product.name} can only be received through a membership`);
     }
@@ -92,7 +117,9 @@ export async function checkout(userId, dto) {
           : `Only ${available} of ${product.name} left in stock`
       );
     }
-    return { product, quantity: line.quantity, unitPrice: Number(product.price) };
+    // Member discount comes from the event, never from the client.
+    const unitPrice = Number((Number(product.price) * (1 - discountPercent / 100)).toFixed(2));
+    return { product, quantity: line.quantity, unitPrice };
   });
 
   const subtotal = Number(lines.reduce((sum, l) => sum + l.unitPrice * l.quantity, 0).toFixed(2));
@@ -126,6 +153,7 @@ export async function checkout(userId, dto) {
     const order = await tx.order.create({
       data: {
         userId,
+        eventId: event.id,
         type: ORDER_TYPE.ONE_TIME,
         status: ORDER_STATUS.PAID,
         subtotal,

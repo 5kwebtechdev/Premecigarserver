@@ -14,6 +14,56 @@ async function ensureUniqueSlug(baseSlug, excludeId) {
   }
 }
 
+const includeProducts = {
+  products: {
+    include: {
+      product: {
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          price: true,
+          isActive: true,
+          images: { orderBy: { sortOrder: 'asc' }, take: 1 },
+          inventory: { select: { stockQty: true } },
+        },
+      },
+    },
+  },
+};
+
+// Members can only buy on the event's date: from the start of the day it
+// begins until its end time (or the end of that same day when no end is set).
+export function saleWindow(event) {
+  const start = new Date(event.startAt);
+  start.setHours(0, 0, 0, 0);
+  const end = event.endAt ? new Date(event.endAt) : new Date(event.startAt);
+  if (!event.endAt) end.setHours(23, 59, 59, 999);
+  return { start, end };
+}
+
+export function isSaleOpen(event, now = new Date()) {
+  if (!event.isPublished) return false;
+  const { start, end } = saleWindow(event);
+  return now >= start && now <= end;
+}
+
+// Flattens the join rows into the products a customer sees, with the
+// member price already worked out.
+function present(event) {
+  const percent = Number(event.discountPercent ?? 0);
+  const products = (event.products ?? []).map(({ product }) => {
+    const price = Number(product.price);
+    return {
+      ...product,
+      price,
+      salePrice: Number((price * (1 - percent / 100)).toFixed(2)),
+      inStock: (product.inventory?.stockQty ?? 0) > 0,
+    };
+  });
+  return { ...event, discountPercent: percent, products, saleOpen: isSaleOpen(event) };
+}
+
 export async function list({ page, limit, search, published, when }) {
   const pagination = parsePagination({ page, limit });
 
@@ -28,34 +78,55 @@ export async function list({ page, limit, search, published, when }) {
   const orderBy = { startAt: when === 'upcoming' ? 'asc' : 'desc' };
 
   const [items, total] = await Promise.all([
-    prisma.event.findMany({ where, skip: pagination.skip, take: pagination.take, orderBy }),
+    prisma.event.findMany({ where, skip: pagination.skip, take: pagination.take, orderBy, include: includeProducts }),
     prisma.event.count({ where }),
   ]);
 
-  return paginatedResponse({ items, total, page: pagination.page, limit: pagination.limit });
+  return paginatedResponse({ items: items.map(present), total, page: pagination.page, limit: pagination.limit });
 }
 
-export async function getById(id) {
-  const event = await prisma.event.findUnique({ where: { id } });
+export async function getRawById(id) {
+  const event = await prisma.event.findUnique({ where: { id }, include: includeProducts });
   if (!event) throw ApiError.notFound('Event not found');
   return event;
 }
 
-export async function create(data) {
-  const slug = await ensureUniqueSlug(slugify(data.slug || data.title));
-  return prisma.event.create({ data: { ...data, slug } });
+export async function getById(id) {
+  return present(await getRawById(id));
 }
 
-export async function update(id, data) {
-  await getById(id);
+async function assertProductsExist(productIds) {
+  if (!productIds?.length) return;
+  const found = await prisma.product.count({ where: { id: { in: productIds } } });
+  if (found !== new Set(productIds).size) throw ApiError.badRequest('One or more selected products no longer exist');
+}
+
+export async function create({ productIds = [], ...data }) {
+  const ids = [...new Set(productIds)];
+  await assertProductsExist(ids);
+  const slug = await ensureUniqueSlug(slugify(data.slug || data.title));
+  const event = await prisma.event.create({
+    data: { ...data, slug, products: { create: ids.map((productId) => ({ productId })) } },
+    include: includeProducts,
+  });
+  return present(event);
+}
+
+export async function update(id, { productIds, ...data }) {
+  await getRawById(id);
   const patch = { ...data };
   if (data.title || data.slug) {
     patch.slug = await ensureUniqueSlug(slugify(data.slug || data.title), id);
   }
-  return prisma.event.update({ where: { id }, data: patch });
+  if (productIds) {
+    const ids = [...new Set(productIds)];
+    await assertProductsExist(ids);
+    patch.products = { deleteMany: {}, create: ids.map((productId) => ({ productId })) };
+  }
+  return present(await prisma.event.update({ where: { id }, data: patch, include: includeProducts }));
 }
 
 export async function remove(id) {
-  await getById(id);
+  await getRawById(id);
   await prisma.event.delete({ where: { id } });
 }
