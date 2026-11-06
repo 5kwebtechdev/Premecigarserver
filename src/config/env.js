@@ -11,6 +11,7 @@ function required(name, fallback) {
 export const env = {
   nodeEnv: process.env.NODE_ENV || 'development',
   isProduction: process.env.NODE_ENV === 'production',
+  cookieSecure: process.env.COOKIE_SECURE === 'true',
   port: Number(process.env.PORT || 4000),
   apiPrefix: process.env.API_PREFIX || '/api/v1',
 

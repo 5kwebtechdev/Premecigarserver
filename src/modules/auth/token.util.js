@@ -72,7 +72,7 @@ export async function revokeAllRefreshTokensForUser(userId) {
 export function refreshCookieOptions(expiresAt) {
   return {
     httpOnly: true,
-    secure: env.isProduction,
+    secure: env.cookieSecure,
     sameSite: 'lax',
     expires: expiresAt,
     path: `${env.apiPrefix}/auth`,
