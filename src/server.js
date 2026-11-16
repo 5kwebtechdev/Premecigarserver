@@ -15,7 +15,7 @@ async function main() {
 
   const app = createApp();
 
-  app.listen(env.port, () => {
+  app.listen(env.port, '127.0.0.1', () => {
     logger.info(`Server listening on http://localhost:${env.port}${env.apiPrefix}`);
   });
 
