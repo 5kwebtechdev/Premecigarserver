@@ -35,6 +35,7 @@ model User {
 
   passwordResetTokenHash    String?
   passwordResetTokenExpires DateTime?
+  passwordResetAttempts     Int       @default(0)
 
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
@@ -550,4 +551,28 @@ model Setting {
   value Json
 
   @@map("settings")
+}
+
+// ─────────────────────────────────────────────────────────
+// CMS — hero / page banners managed from the admin panel
+// ─────────────────────────────────────────────────────────
+// `pageKey` says which storefront page the banner belongs to. Page banners use
+// the first active row for a key; the "home" key is a slider so every active
+// row is shown (ordered by sortOrder).
+model Banner {
+  id           Int      @id @default(autoincrement())
+  pageKey      String
+  title        String?
+  subtitle     String?  @db.Text
+  imageUrl     String
+  eyebrow      String?
+  buttonTitle  String?
+  buttonLink   String?
+  sortOrder    Int      @default(0)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([pageKey, isActive, sortOrder])
+  @@map("banners")
 }

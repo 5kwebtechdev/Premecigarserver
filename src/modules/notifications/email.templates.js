@@ -126,27 +126,29 @@ export function welcomeEmail({ user, verifyUrl }) {
 }
 
 // ── Password reset ───────────────────────────────────────
-export function passwordResetEmail({ user, resetUrl, expiresMinutes }) {
+export function passwordResetEmail({ user, otp, expiresMinutes }) {
   const name = user.firstName ? escapeHtml(user.firstName) : 'there';
   const bodyHtml = `
     <p style="margin:0 0 14px;">Hi ${name},</p>
     <p style="margin:0 0 14px;">
-      We got a request to reset your password. This link expires in
+      Use this code to reset your password. It expires in
       <strong>${Number(expiresMinutes)} minutes</strong>.
     </p>
-    <p style="margin:0;">Link not clickable?<br>
-      <a href="${escapeHtml(resetUrl)}" style="color:${BRAND.accent};word-break:break-all;">${escapeHtml(resetUrl)}</a>
-    </p>`;
+    <p style="margin:0 0 14px;text-align:center;font-size:32px;font-weight:700;letter-spacing:8px;color:${BRAND.accent};">
+      ${escapeHtml(otp)}
+    </p>
+    <p style="margin:0;font-size:14px;color:${BRAND.muted};">Never share this code with anyone.</p>`;
   return {
-    subject: `Reset your ${BRAND.name} password`,
+    subject: `${otp} is your ${BRAND.name} password reset code`,
     html: renderLayout({
-      previewText: 'Reset your password.',
-      heading: 'Reset your password',
+      previewText: `Your password reset code is ${otp}.`,
+      heading: 'Your verification code',
       bodyHtml,
-      cta: { label: 'Choose a new password', url: resetUrl },
       footerNote: "Didn't ask for this? Your password is unchanged — you can ignore this email.",
     }),
-    text: `Hi ${user.firstName || 'there'},\n\nReset your ${BRAND.name} password (expires in ${expiresMinutes} minutes):\n${resetUrl}`,
+    text: `Hi ${user.firstName || 'there'},
+
+Your ${BRAND.name} password reset code is ${otp}. It expires in ${expiresMinutes} minutes. Never share it with anyone.`,
   };
 }
 

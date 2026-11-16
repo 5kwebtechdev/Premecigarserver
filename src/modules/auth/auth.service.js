@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../../config/db.js';
 import { env } from '../../config/env.js';
@@ -17,7 +18,6 @@ import {
 
 const PASSWORD_SALT_ROUNDS = 12;
 const EMAIL_VERIFY_EXPIRES_HOURS = 24;
-const PASSWORD_RESET_EXPIRES_MINUTES = 30;
 
 function toPublicUser(user) {
   const { passwordHash, emailVerifyTokenHash, passwordResetTokenHash, ...publicUser } = user;
@@ -106,27 +106,37 @@ export async function logout(rawRefreshToken) {
   }
 }
 
+// Password reset is a 3-step OTP flow:
+//   1. forgotPassword   — emails a 6-digit code (valid OTP_EXPIRES_MINUTES)
+//   2. verifyResetOtp   — trades the code for a short-lived opaque reset token
+//   3. resetPassword    — sets the new password using that token
+// The code is stored only as a hash salted with the email, so it can't be
+// confused with (or used as) a reset token, and it dies after a few wrong tries.
+const OTP_EXPIRES_MINUTES = 10;
+const OTP_MAX_ATTEMPTS = 5;
+const RESET_TOKEN_EXPIRES_MINUTES = 15;
+
+function hashOtp(email, otp) {
+  return hashToken(`pwreset:${email.toLowerCase()}:${otp}`);
+}
+
 export async function forgotPassword(email) {
   const user = await prisma.user.findUnique({ where: { email } });
   // Always respond success-shaped to the caller (controller does this) —
   // don't leak whether an email is registered.
   if (!user) return;
 
-  const resetToken = generateOpaqueToken();
+  const otp = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
   await prisma.user.update({
     where: { id: user.id },
     data: {
-      passwordResetTokenHash: hashToken(resetToken),
-      passwordResetTokenExpires: new Date(Date.now() + PASSWORD_RESET_EXPIRES_MINUTES * 60 * 1000),
+      passwordResetTokenHash: hashOtp(user.email, otp),
+      passwordResetTokenExpires: new Date(Date.now() + OTP_EXPIRES_MINUTES * 60 * 1000),
+      passwordResetAttempts: 0,
     },
   });
 
-  const resetUrl = `${env.webAppUrl}/reset-password?token=${resetToken}`;
-  const mail = passwordResetEmail({
-    user,
-    resetUrl,
-    expiresMinutes: PASSWORD_RESET_EXPIRES_MINUTES,
-  });
+  const mail = passwordResetEmail({ user, otp, expiresMinutes: OTP_EXPIRES_MINUTES });
   await notify({
     userId: user.id,
     type: NOTIFICATION_TYPE.PASSWORD_RESET,
@@ -135,6 +145,39 @@ export async function forgotPassword(email) {
     html: mail.html,
     text: mail.text,
   }).catch((err) => logger.error(`[auth] password-reset email failed for ${user.email}`, err));
+}
+
+export async function verifyResetOtp({ email, otp }) {
+  const invalid = () => ApiError.badRequest('Invalid or expired code');
+  const user = await prisma.user.findUnique({ where: { email } });
+  if (
+    !user ||
+    !user.passwordResetTokenHash ||
+    !user.passwordResetTokenExpires ||
+    user.passwordResetTokenExpires < new Date() ||
+    user.passwordResetAttempts >= OTP_MAX_ATTEMPTS
+  ) {
+    throw invalid();
+  }
+
+  if (hashOtp(user.email, otp) !== user.passwordResetTokenHash) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordResetAttempts: { increment: 1 } },
+    });
+    throw invalid();
+  }
+
+  const resetToken = generateOpaqueToken();
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      passwordResetTokenHash: hashToken(resetToken),
+      passwordResetTokenExpires: new Date(Date.now() + RESET_TOKEN_EXPIRES_MINUTES * 60 * 1000),
+      passwordResetAttempts: 0,
+    },
+  });
+  return { resetToken };
 }
 
 export async function resetPassword({ token, password }) {
@@ -154,6 +197,7 @@ export async function resetPassword({ token, password }) {
       passwordHash,
       passwordResetTokenHash: null,
       passwordResetTokenExpires: null,
+      passwordResetAttempts: 0,
     },
   });
 

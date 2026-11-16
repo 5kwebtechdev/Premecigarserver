@@ -1,5 +1,5 @@
 import { prisma } from '../../../config/db.js';
-import { SUBSCRIPTION_STATUS, SUBSCRIPTION_PAYMENT_STATUS, ORDER_TYPE } from '../../../config/constants.js';
+import { SUBSCRIPTION_STATUS, SUBSCRIPTION_PAYMENT_STATUS, ORDER_TYPE, ORDER_STATUS } from '../../../config/constants.js';
 import { monthlyEquivalentPrice } from '../../subscriptions/subscription.lifecycle.js';
 
 export async function getMetrics() {
@@ -20,6 +20,7 @@ export async function getMetrics() {
     pastDueSubscriptions,
     newSubscriptionsThisMonth,
     cancelledThisMonth,
+    cancelledOrdersGroups,
     activePlanPrices,
     subscriptionRevenueAgg,
     totalProducts,
@@ -34,6 +35,11 @@ export async function getMetrics() {
     prisma.subscription.count({ where: { status: SUBSCRIPTION_STATUS.PAST_DUE } }),
     prisma.subscription.count({ where: { createdAt: { gte: startOfMonth } } }),
     prisma.subscription.count({ where: { cancelledAt: { gte: startOfMonth } } }),
+    // Orders have no cancelledAt column — the status history records when each one was cancelled.
+    prisma.orderStatusHistory.groupBy({
+      by: ['orderId'],
+      where: { status: ORDER_STATUS.CANCELLED, changedAt: { gte: startOfMonth } },
+    }),
     prisma.subscription.findMany({
       where: { status: SUBSCRIPTION_STATUS.ACTIVE },
       select: { plan: { select: { price: true, billingFrequency: true } } },
@@ -61,6 +67,7 @@ export async function getMetrics() {
     pastDueSubscriptions,
     newSubscriptionsThisMonth,
     cancelledThisMonth,
+    cancelledOrdersThisMonth: cancelledOrdersGroups.length,
     mrr,
     subscriptionRevenueThisMonth: Number(subscriptionRevenueAgg._sum.amount ?? 0),
     totalProducts,

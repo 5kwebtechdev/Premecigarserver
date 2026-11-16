@@ -8,6 +8,10 @@ export const getMineById = asyncHandler(async (req, res) =>
   res.json({ order: await orderService.getMineById(req.user.id, Number(req.params.id)) })
 );
 
+export const cancelMine = asyncHandler(async (req, res) =>
+  res.json({ order: await orderService.cancelMine(req.user.id, Number(req.params.id), req.body?.reason) })
+);
+
 export const checkout = asyncHandler(async (req, res) => {
   const result = await orderService.checkout(req.user.id, req.body);
   res.status(201).json(result);

@@ -39,10 +39,9 @@ export const subscribeSchema = z.object({
       paymentIntentId: z.string().startsWith('pi_').optional(),
       paymentMethod: z
         .object({
-          type: z.enum(['card', 'paypal', 'applepay']).optional(),
+          type: z.enum(['card', 'paypal', 'applepay'], { required_error: 'Select a payment method' }),
           label: z.string().max(120).optional(),
-        })
-        .optional(),
+        }, { required_error: 'Select a payment method' }),
     })
     .refine(
       (v) =>

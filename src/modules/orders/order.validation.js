@@ -16,6 +16,11 @@ export const idParamSchema = z.object({
   params: z.object({ id: z.coerce.number().int().positive() }),
 });
 
+export const cancelOrderSchema = z.object({
+  params: z.object({ id: z.coerce.number().int().positive() }),
+  body: z.object({ reason: z.string().max(300).optional() }).optional(),
+});
+
 const addressInput = z.object({
   label: z.string().max(60).optional(),
   line1: z.string().min(1),
@@ -47,10 +52,9 @@ export const checkoutSchema = z.object({
       shippingAddress: addressInput.optional(),
       paymentMethod: z
         .object({
-          type: z.enum(['card', 'paypal', 'applepay']).optional(),
+          type: z.enum(['card', 'paypal', 'applepay'], { required_error: 'Select a payment method' }),
           label: z.string().max(120).optional(),
-        })
-        .optional(),
+        }, { required_error: 'Select a payment method' }),
     })
     .refine(
       (v) =>

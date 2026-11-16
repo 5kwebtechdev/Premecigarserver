@@ -20,6 +20,9 @@ export const env = {
   accessTokenExpiresIn: process.env.ACCESS_TOKEN_EXPIRES_IN || '15m',
   refreshTokenExpiresInDays: Number(process.env.REFRESH_TOKEN_EXPIRES_IN_DAYS || 30),
   refreshTokenCookieName: process.env.REFRESH_TOKEN_COOKIE_NAME || 'preme_refresh_token',
+  // Admin panel gets its own cookie: browsers don't isolate cookies by port, so a
+  // shared name lets an admin login overwrite the storefront customer's session.
+  adminRefreshTokenCookieName: process.env.ADMIN_REFRESH_TOKEN_COOKIE_NAME || 'preme_admin_refresh_token',
 
   clientWebOrigin: process.env.CLIENT_WEB_ORIGIN || 'http://localhost:5173',
   clientAdminOrigin: process.env.CLIENT_ADMIN_ORIGIN || 'http://localhost:5174',

@@ -17,13 +17,11 @@ const UPLOADS_DIR = path.join(fileURLToPath(new URL('../uploads', import.meta.ur
 export function createApp() {
   const app = express();
 
-  app.use(helmet());
-  app.use(
-    cors({
-      origin: [env.clientWebOrigin, env.clientAdminOrigin],
-      credentials: true,
-    })
-  );
+  app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+  // Allow every origin. A literal "*" is rejected by browsers on credentialed
+  // requests (the refresh cookie), so `origin: true` reflects whatever Origin
+  // the request came from — same effect as "*", but cookies still work.
+  app.use(cors({ origin: true, credentials: true }));
 
   // Static hosting for admin-uploaded product images. Served off the app root
   // (not under the API prefix) so stored URLs are stable. CORP is relaxed to

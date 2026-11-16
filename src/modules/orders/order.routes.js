@@ -10,6 +10,7 @@ import {
   updateTrackingSchema,
   listOrdersSchema,
   checkoutSchema,
+  cancelOrderSchema,
 } from './order.validation.js';
 
 const router = Router();
@@ -19,6 +20,7 @@ const router = Router();
 router.post('/checkout', authenticate, validate(checkoutSchema), orderController.checkout);
 router.get('/me', authenticate, validate(listOrdersSchema), orderController.listMine);
 router.get('/me/:id', authenticate, validate(idParamSchema), orderController.getMineById);
+router.post('/me/:id/cancel', authenticate, validate(cancelOrderSchema), orderController.cancelMine);
 
 // Everything below is admin management only: list, view, status, tracking.
 router.use(authenticate, authorize(...ADMIN_ROLES));

@@ -3,44 +3,54 @@ import { asyncHandler } from '../../utils/asyncHandler.js';
 import { refreshCookieOptions } from './token.util.js';
 import * as authService from './auth.service.js';
 
-function setRefreshCookie(res, refreshToken, expiresAt) {
-  res.cookie(env.refreshTokenCookieName, refreshToken, refreshCookieOptions(expiresAt));
+// The admin panel sends `X-Client-App: admin`; every other client is the storefront.
+// Each gets its own cookie so signing in to one never replaces the other's session.
+function cookieNameFor(req) {
+  return req.get('x-client-app') === 'admin' ? env.adminRefreshTokenCookieName : env.refreshTokenCookieName;
 }
 
-function clearRefreshCookie(res) {
-  res.clearCookie(env.refreshTokenCookieName, { path: `${env.apiPrefix}/auth` });
+function setRefreshCookie(req, res, refreshToken, expiresAt) {
+  res.cookie(cookieNameFor(req), refreshToken, refreshCookieOptions(expiresAt));
+}
+
+function clearRefreshCookie(req, res) {
+  res.clearCookie(cookieNameFor(req), { path: `${env.apiPrefix}/auth` });
 }
 
 export const register = asyncHandler(async (req, res) => {
   const { user, accessToken, refreshToken, refreshTokenExpiresAt } = await authService.register(req.body);
-  setRefreshCookie(res, refreshToken, refreshTokenExpiresAt);
+  setRefreshCookie(req, res, refreshToken, refreshTokenExpiresAt);
   res.status(201).json({ user, accessToken });
 });
 
 export const login = asyncHandler(async (req, res) => {
   const { user, accessToken, refreshToken, refreshTokenExpiresAt } = await authService.login(req.body);
-  setRefreshCookie(res, refreshToken, refreshTokenExpiresAt);
+  setRefreshCookie(req, res, refreshToken, refreshTokenExpiresAt);
   res.json({ user, accessToken });
 });
 
 export const refresh = asyncHandler(async (req, res) => {
-  const rawToken = req.cookies?.[env.refreshTokenCookieName];
+  const rawToken = req.cookies?.[cookieNameFor(req)];
   const { user, accessToken, refreshToken, refreshTokenExpiresAt } = await authService.refresh(rawToken);
-  setRefreshCookie(res, refreshToken, refreshTokenExpiresAt);
+  setRefreshCookie(req, res, refreshToken, refreshTokenExpiresAt);
   res.json({ user, accessToken });
 });
 
 export const logout = asyncHandler(async (req, res) => {
-  const rawToken = req.cookies?.[env.refreshTokenCookieName];
+  const rawToken = req.cookies?.[cookieNameFor(req)];
   await authService.logout(rawToken);
-  clearRefreshCookie(res);
+  clearRefreshCookie(req, res);
   res.status(204).send();
 });
 
 export const forgotPassword = asyncHandler(async (req, res) => {
   await authService.forgotPassword(req.body.email);
   // Same response whether or not the email exists, by design.
-  res.json({ message: 'If that email is registered, a reset link has been sent.' });
+  res.json({ message: 'If that email is registered, a verification code has been sent.' });
+});
+
+export const verifyResetOtp = asyncHandler(async (req, res) => {
+  res.json(await authService.verifyResetOtp(req.body));
 });
 
 export const resetPassword = asyncHandler(async (req, res) => {

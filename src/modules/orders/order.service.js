@@ -70,6 +70,54 @@ export async function getMineById(userId, id) {
 // products without a membership). Memberships still go through the
 // subscription engine — this path never creates a subscription.
 // ─────────────────────────────────────────────────────────
+// Customers may cancel only before the order is packed/shipped.
+const CUSTOMER_CANCELLABLE = [ORDER_STATUS.PENDING_PAYMENT, ORDER_STATUS.PAID, ORDER_STATUS.PROCESSING];
+
+export async function cancelMine(userId, id, reason) {
+  const order = await prisma.order.findUnique({ where: { id }, include: { items: true, payment: true } });
+  if (!order || order.userId !== userId) throw ApiError.notFound('Order not found');
+  if (!CUSTOMER_CANCELLABLE.includes(order.status)) {
+    throw ApiError.conflict(
+      order.status === ORDER_STATUS.CANCELLED
+        ? 'This order is already cancelled'
+        : 'This order has already been packed or shipped and can no longer be cancelled'
+    );
+  }
+
+  const wasCharged = order.payment?.status === PAYMENT_STATUS.SUCCEEDED;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.order.update({ where: { id }, data: { status: ORDER_STATUS.CANCELLED } });
+    await tx.orderStatusHistory.create({
+      data: {
+        orderId: id,
+        status: ORDER_STATUS.CANCELLED,
+        note: reason ? `Cancelled by customer: ${reason}` : 'Cancelled by customer',
+      },
+    });
+    // à-la-carte orders took stock at checkout — put it back.
+    if (order.type === ORDER_TYPE.ONE_TIME) {
+      for (const item of order.items) {
+        await tx.inventory.updateMany({
+          where: { productId: item.productId },
+          data: { stockQty: { increment: item.quantity } },
+        });
+      }
+    }
+    if (wasCharged) {
+      await tx.payment.update({ where: { id: order.payment.id }, data: { status: PAYMENT_STATUS.REFUNDED } });
+    }
+  });
+
+  if (wasCharged) {
+    await paymentProvider
+      .refund(order.payment.providerRef, Math.round(Number(order.total) * 100))
+      .catch((err) => logger.error(`[orders] refund failed for #${id}`, err));
+  }
+
+  return getMineById(userId, id);
+}
+
 export async function checkout(userId, dto) {
   // 0. Products are only sold at members-only events: the buyer needs an
   // active membership, and the event must be on today.
