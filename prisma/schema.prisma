@@ -192,6 +192,9 @@ model MembershipPlan {
   productId    Int?
   product      Product? @relation("PlanShipmentProduct", fields: [productId], references: [id])
   shipQuantity Int      @default(1)
+
+  // Member discount: % off every product this plan's subscribers buy à la carte.
+  discountPercent Decimal @default(0) @db.Decimal(5, 2)
   imageUrl     String?
   tagline      String?
 

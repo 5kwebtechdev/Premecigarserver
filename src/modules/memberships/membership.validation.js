@@ -15,6 +15,8 @@ export const createPlanSchema = z.object({
     // The cigar shipped every billing cycle, and how many.
     productId: z.coerce.number().int().positive().optional().nullable(),
     shipQuantity: z.coerce.number().int().positive().max(50).optional().default(1),
+    // % off all products for members of this plan.
+    discountPercent: z.coerce.number().min(0).max(100).optional().default(0),
     imageUrl: z.string().url().optional().nullable().or(z.literal('')),
     tagline: z.string().max(160).optional().nullable().or(z.literal('')),
   }),

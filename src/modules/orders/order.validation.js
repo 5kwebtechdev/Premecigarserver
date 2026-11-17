@@ -35,8 +35,9 @@ const addressInput = z.object({
 export const checkoutSchema = z.object({
   body: z
     .object({
-      // Purchases only happen through a members-only event.
-      eventId: z.coerce.number().int().positive(),
+      // Optional: buying through a members event uses that event's rules; without it,
+      // any active member can buy at their plan's member discount.
+      eventId: z.coerce.number().int().positive().optional(),
       items: z
         .array(
           z.object({
