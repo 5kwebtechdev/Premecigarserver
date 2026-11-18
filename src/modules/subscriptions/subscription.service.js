@@ -155,6 +155,8 @@ export async function subscribe(userId, dto) {
         status: SUBSCRIPTION_PAYMENT_STATUS.SUCCEEDED,
         attemptNumber: 1,
         providerRef: charge.providerRef,
+        kind: 'SIGNUP',
+        description: `Joined ${plan.name}`,
         createdAt: now,
       },
     });
@@ -369,6 +371,8 @@ export async function upgrade(subscriptionId, userId, { planId, when, paymentInt
         status: SUBSCRIPTION_PAYMENT_STATUS.SUCCEEDED,
         attemptNumber: 1,
         providerRef: charge.providerRef,
+        kind: 'UPGRADE',
+        description: `Upgrade: ${fromPlan.name} to ${plan.name}`,
       },
     });
     await tx.payment.create({

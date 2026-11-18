@@ -46,6 +46,8 @@ export async function getMetrics() {
     subscriptionRows,
     lowStockProducts,
     scheduledUpgrades,
+    paymentsThisMonth,
+    paymentsLastMonth,
   ] = await Promise.all([
     prisma.user.count({ where: { role: 'CUSTOMER' } }),
     prisma.order.count({ where: { placedAt: { gte: startOfToday } } }),
@@ -92,6 +94,16 @@ export async function getMetrics() {
       select: { stockQty: true, lowStockThreshold: true, product: { select: { id: true, name: true } } },
     }),
     prisma.subscription.count({ where: { status: SUBSCRIPTION_STATUS.ACTIVE, pendingPlanId: { not: null } } }),
+    // Every membership payment (sign-ups, renewals AND upgrades) - upgrades never replace earlier payments.
+    prisma.subscriptionPayment.groupBy({
+      by: ['kind'],
+      _sum: { amount: true },
+      where: { status: SUBSCRIPTION_PAYMENT_STATUS.SUCCEEDED, createdAt: { gte: startOfMonth } },
+    }),
+    prisma.subscriptionPayment.aggregate({
+      _sum: { amount: true },
+      where: { status: SUBSCRIPTION_PAYMENT_STATUS.SUCCEEDED, createdAt: { gte: startOfLastMonth, lt: startOfMonth } },
+    }),
   ]);
 
   const lowStockCount = inventoryRows.filter((i) => i.stockQty <= i.lowStockThreshold).length;
@@ -161,7 +173,22 @@ export async function getMetrics() {
     .map((r) => ({ ...r, mrr: Number(r.mrr.toFixed(2)) }))
     .sort((a, b) => b.mrr - a.mrr);
 
+  const byKind = Object.fromEntries(paymentsThisMonth.map((g) => [g.kind, Number(g._sum.amount ?? 0)]));
+  const money = (n) => Number((n ?? 0).toFixed(2));
+  const salesMonth = Number(revenueMonthAgg._sum.total ?? 0);
+  const revenueBreakdown = {
+    sales: money(salesMonth),
+    signups: money(byKind.SIGNUP),
+    renewals: money(byKind.RENEWAL),
+    upgrades: money(byKind.UPGRADE),
+  };
+  const totalRevenueThisMonth = money(salesMonth + Object.values(byKind).reduce((s, v) => s + v, 0));
+  const totalRevenueLastMonth = money(Number(revenueLastMonthAgg._sum.total ?? 0) + Number(paymentsLastMonth._sum.amount ?? 0));
+
   return {
+    revenueBreakdown,
+    totalRevenueThisMonth,
+    totalRevenueLastMonth,
     mrrByPlan,
     scheduledUpgrades,
     salesByDay,

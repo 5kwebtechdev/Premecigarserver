@@ -259,6 +259,9 @@ model SubscriptionPayment {
   status         SubscriptionPaymentStatus @default(PENDING)
   attemptNumber  Int                       @default(1)
   providerRef    String?
+  // SIGNUP | RENEWAL | UPGRADE - what the money was for, so every payment stays on record.
+  kind           String                    @default("RENEWAL")
+  description    String?
   createdAt      DateTime                  @default(now())
 
   subscription Subscription @relation(fields: [subscriptionId], references: [id])

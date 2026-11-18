@@ -144,6 +144,8 @@ async function billOne(sub, now) {
           status: SUBSCRIPTION_PAYMENT_STATUS.SUCCEEDED,
           attemptNumber,
           providerRef: charge.providerRef,
+          kind: upgradingTo ? 'UPGRADE' : 'RENEWAL',
+          description: upgradingTo ? `Scheduled upgrade to ${plan.name}` : `${plan.name} renewal`,
         },
       });
       await tx.payment.create({
