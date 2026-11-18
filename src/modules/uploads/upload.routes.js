@@ -36,7 +36,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB
   fileFilter: (_req, file, cb) => {
     if (ALLOWED_MIME.has(file.mimetype)) return cb(null, true);
     cb(new ApiError(400, 'Only image files (jpg, png, webp, gif, avif) are allowed'));
@@ -53,7 +53,7 @@ router.post(
   (req, res, next) =>
     upload.single('image')(req, res, (err) => {
       if (err instanceof multer.MulterError) {
-        return next(new ApiError(400, err.code === 'LIMIT_FILE_SIZE' ? 'Image must be 5 MB or smaller' : err.message));
+        return next(new ApiError(400, err.code === 'LIMIT_FILE_SIZE' ? 'Image must be 50 MB or smaller' : err.message));
       }
       if (err) return next(err);
       next();
@@ -65,10 +65,10 @@ router.post(
   })
 );
 
-// POST /uploads/avatar — any signed-in user, for their own profile picture (2 MB max).
+// POST /uploads/avatar — any signed-in user, for their own profile picture (50 MB max).
 const avatarUpload = multer({
   storage,
-  limits: { fileSize: 2 * 1024 * 1024 },
+  limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (_req, file, cb) =>
     ALLOWED_MIME.has(file.mimetype) ? cb(null, true) : cb(new ApiError(400, "Only image files are allowed")),
 });
@@ -79,7 +79,7 @@ router.post(
   (req, res, next) =>
     avatarUpload.single('image')(req, res, (err) => {
       if (err instanceof multer.MulterError) {
-        return next(new ApiError(400, err.code === 'LIMIT_FILE_SIZE' ? 'Photo must be 2 MB or smaller' : err.message));
+        return next(new ApiError(400, err.code === 'LIMIT_FILE_SIZE' ? 'Photo must be 50 MB or smaller' : err.message));
       }
       if (err) return next(err);
       next();

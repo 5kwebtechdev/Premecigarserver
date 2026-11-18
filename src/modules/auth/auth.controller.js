@@ -44,9 +44,8 @@ export const logout = asyncHandler(async (req, res) => {
 });
 
 export const forgotPassword = asyncHandler(async (req, res) => {
-  await authService.forgotPassword(req.body.email);
-  // Same response whether or not the email exists, by design.
-  res.json({ message: 'If that email is registered, a verification code has been sent.' });
+  const result = await authService.forgotPassword(req.body.email);
+  res.json({ message: 'A verification code has been sent to your email.', ...result });
 });
 
 export const verifyResetOtp = asyncHandler(async (req, res) => {

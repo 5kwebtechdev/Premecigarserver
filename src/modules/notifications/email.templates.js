@@ -101,27 +101,32 @@ function lineItemsTable(lines) {
 }
 
 // ── Signup ───────────────────────────────────────────────
-export function welcomeEmail({ user, verifyUrl }) {
+export function welcomeEmail({ user }) {
   const name = user.firstName ? escapeHtml(user.firstName) : 'there';
+  const url = `${BRAND.web}/pricing`;
   const bodyHtml = `
     <p style="margin:0 0 14px;">Hi ${name},</p>
     <p style="margin:0 0 14px;">
-      Welcome to ${escapeHtml(BRAND.name)} — your account is ready. Confirm your email address
-      to secure your account and unlock membership checkout.
+      Welcome to ${escapeHtml(BRAND.name)} — your account is ready.
     </p>
-    <p style="margin:0;">If the button doesn't work, paste this link into your browser:<br>
-      <a href="${escapeHtml(verifyUrl)}" style="color:${BRAND.accent};word-break:break-all;">${escapeHtml(verifyUrl)}</a>
+    <p style="margin:0;">
+      Join a membership to unlock member pricing on every cigar and access to members-only events.
     </p>`;
   return {
-    subject: `Welcome to ${BRAND.name} — confirm your email`,
+    subject: `Welcome to ${BRAND.name}`,
     html: renderLayout({
-      previewText: 'Confirm your email to finish setting up your account.',
+      previewText: 'Your account is ready.',
       heading: 'Welcome to the club',
       bodyHtml,
-      cta: { label: 'Confirm my email', url: verifyUrl },
+      cta: { label: 'View memberships', url },
       footerNote: "If you didn't create this account, you can ignore this email.",
     }),
-    text: `Hi ${user.firstName || 'there'},\n\nWelcome to ${BRAND.name} — confirm your email:\n${verifyUrl}\n\nIf you didn't create this account, ignore this email.`,
+    text: `Hi ${user.firstName || 'there'},
+
+Welcome to ${BRAND.name} — your account is ready.
+Join a membership for member pricing: ${url}
+
+If you didn't create this account, ignore this email.`,
   };
 }
 
@@ -213,5 +218,58 @@ export function subscriptionWelcomeEmail({ user, plan, amount, nextBillingDate }
       `Hi ${user.firstName || 'there'},\n\nWelcome to ${plan.name}. Your member pricing is active now.\n\n` +
       `Charged today: ${money(amount)}\nNext charge: ${formatDate(nextBillingDate)}\n\n` +
       `Manage your membership: ${BRAND.web}/subscriptions`,
+  };
+}
+
+// ── Order status updates ─────────────────────────────────
+export function orderStatusEmail({ user, order, status, trackingNumber, refunded }) {
+  const name = user.firstName ? escapeHtml(user.firstName) : 'there';
+  const url = `${BRAND.web}/orders/${order.id}`;
+  const copy = {
+    SHIPPED: {
+      subject: `Your ${BRAND.name} order #${order.id} has shipped`,
+      heading: 'Your order is on its way',
+      line: 'Good news - your order has shipped.',
+    },
+    DELIVERED: {
+      subject: `Your ${BRAND.name} order #${order.id} was delivered`,
+      heading: 'Order delivered',
+      line: 'Your order has been delivered. We hope you enjoy it.',
+    },
+    CANCELLED: {
+      subject: `Your ${BRAND.name} order #${order.id} was cancelled`,
+      heading: 'Order cancelled',
+      line: refunded
+        ? 'Your order has been cancelled and your payment is being refunded to your original payment method (allow 5-10 business days).'
+        : 'Your order has been cancelled.',
+    },
+  }[status];
+  const tracking =
+    status === 'SHIPPED' && trackingNumber
+      ? `<p style="margin:14px 0 0;">Tracking number: <strong>${escapeHtml(trackingNumber)}</strong></p>`
+      : '';
+  const bodyHtml = `
+    <p style="margin:0 0 14px;">Hi ${name},</p>
+    <p style="margin:0 0 4px;">${escapeHtml(copy.line)}</p>
+    <p style="margin:0;font-size:14px;color:${BRAND.muted};">Order #${escapeHtml(order.id)}</p>
+    ${tracking}`;
+  return {
+    subject: copy.subject,
+    html: renderLayout({
+      previewText: copy.heading,
+      heading: copy.heading,
+      bodyHtml,
+      cta: { label: 'View your order', url },
+    }),
+    text:
+      `Hi ${user.firstName || 'there'},
+
+${copy.line}
+Order #${order.id}
+` +
+      (status === 'SHIPPED' && trackingNumber ? `Tracking number: ${trackingNumber}
+` : '') +
+      `
+${url}`,
   };
 }

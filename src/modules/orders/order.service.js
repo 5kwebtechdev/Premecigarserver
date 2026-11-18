@@ -1,3 +1,4 @@
+import { orderStatusEmail } from '../notifications/email.templates.js';
 import * as couponService from '../coupons/coupon.service.js';
 import { prisma } from '../../config/db.js';
 import { ApiError } from '../../utils/ApiError.js';
@@ -120,6 +121,8 @@ export async function cancelMine(userId, id, reason) {
       .refund(order.payment.providerRef, Math.round(Number(order.total) * 100))
       .catch((err) => logger.error(`[orders] refund failed for #${id}`, err));
   }
+
+  await sendStatusEmail(id, ORDER_STATUS.CANCELLED, { refunded: wasCharged });
 
   return getMineById(userId, id);
 }
@@ -391,13 +394,47 @@ export async function getById(id) {
   return order;
 }
 
+const STATUS_EMAIL_TYPE = {
+  SHIPPED: NOTIFICATION_TYPE.ORDER_SHIPPED,
+  DELIVERED: NOTIFICATION_TYPE.ORDER_DELIVERED,
+  CANCELLED: NOTIFICATION_TYPE.ORDER_CANCELLED,
+};
+
+// Emails the customer when their order ships, is delivered or is cancelled. Never throws.
+async function sendStatusEmail(orderId, status, extra = {}) {
+  if (!STATUS_EMAIL_TYPE[status]) return;
+  try {
+    const order = await prisma.order.findUnique({ where: { id: orderId }, include: { user: true } });
+    if (!order?.user) return;
+    const mail = orderStatusEmail({
+      user: order.user,
+      order,
+      status,
+      trackingNumber: order.trackingNumber,
+      ...extra,
+    });
+    await notify({
+      userId: order.userId,
+      type: STATUS_EMAIL_TYPE[status],
+      to: order.user.email,
+      subject: mail.subject,
+      html: mail.html,
+      text: mail.text,
+    });
+  } catch (err) {
+    logger.error(`[orders] ${status} email failed for #${orderId}`, err);
+  }
+}
+
 export async function updateStatus(id, { status, note }) {
-  await getById(id);
-  return prisma.$transaction(async (tx) => {
-    const order = await tx.order.update({ where: { id }, data: { status } });
+  const before = await getById(id);
+  const order = await prisma.$transaction(async (tx) => {
+    const updated = await tx.order.update({ where: { id }, data: { status } });
     await tx.orderStatusHistory.create({ data: { orderId: id, status, note } });
-    return order;
+    return updated;
   });
+  if (before.status !== status) await sendStatusEmail(id, status);
+  return order;
 }
 
 // NOTE: default assumption — adding a tracking number also marks the order
@@ -415,6 +452,9 @@ export async function updateTracking(id, trackingNumber) {
         data: { orderId: id, status: 'SHIPPED', note: `Tracking added: ${trackingNumber}` },
       });
     }
+    return updated;
+  }).then(async (updated) => {
+    if (order.status !== 'SHIPPED' && order.status !== 'DELIVERED') await sendStatusEmail(id, 'SHIPPED');
     return updated;
   });
 }

@@ -7,6 +7,7 @@ import { generateOpaqueToken, hashToken } from '../../utils/tokenHash.js';
 import { logger } from '../../utils/logger.js';
 import { NOTIFICATION_TYPE } from '../../config/constants.js';
 import { notify } from '../notifications/notification.service.js';
+import { sendMail } from '../notifications/mailer.js';
 import { welcomeEmail, passwordResetEmail } from '../notifications/email.templates.js';
 import {
   signAccessToken,
@@ -46,7 +47,7 @@ export async function register({ email, password, firstName, lastName, phone }) 
   });
 
   const verifyUrl = `${env.webAppUrl}/verify-email?token=${emailVerifyToken}`;
-  const mail = welcomeEmail({ user, verifyUrl });
+  const mail = welcomeEmail({ user });
   await notify({
     userId: user.id,
     type: NOTIFICATION_TYPE.WELCOME,
@@ -122,9 +123,7 @@ function hashOtp(email, otp) {
 
 export async function forgotPassword(email) {
   const user = await prisma.user.findUnique({ where: { email } });
-  // Always respond success-shaped to the caller (controller does this) —
-  // don't leak whether an email is registered.
-  if (!user) return;
+  if (!user) throw ApiError.notFound('No account found with this email address');
 
   const otp = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
   await prisma.user.update({
@@ -137,14 +136,34 @@ export async function forgotPassword(email) {
   });
 
   const mail = passwordResetEmail({ user, otp, expiresMinutes: OTP_EXPIRES_MINUTES });
-  await notify({
-    userId: user.id,
-    type: NOTIFICATION_TYPE.PASSWORD_RESET,
-    to: user.email,
-    subject: mail.subject,
-    html: mail.html,
-    text: mail.text,
-  }).catch((err) => logger.error(`[auth] password-reset email failed for ${user.email}`, err));
+  let status = 'SENT';
+  let result;
+  try {
+    result = await sendMail({ to: user.email, subject: mail.subject, html: mail.html, text: mail.text });
+    if (result.simulated) status = 'SIMULATED';
+    else if (!result.accepted?.length) status = 'FAILED';
+  } catch (err) {
+    status = 'FAILED';
+    logger.error(`[auth] password-reset email failed for ${user.email}`, err);
+    await logReset(user, status);
+    throw new ApiError(502, `We couldn't send the email (SMTP error: ${err.response || err.message}). Please try again.`);
+  }
+  await logReset(user, status);
+
+  if (status === 'FAILED') {
+    throw new ApiError(502, 'The mail server did not accept this email address. Please check it and try again.');
+  }
+  if (status === 'SIMULATED') {
+    throw new ApiError(503, 'Email sending is not set up on the server yet (SMTP is not configured).');
+  }
+  logger.info(`[auth] password-reset code sent to ${user.email} (messageId ${result.messageId})`);
+  return { sent: true, accepted: result.accepted, messageId: result.messageId };
+}
+
+function logReset(user, status) {
+  return prisma.notificationLog
+    .create({ data: { userId: user.id, type: NOTIFICATION_TYPE.PASSWORD_RESET, channel: 'EMAIL', recipient: user.email, status } })
+    .catch((err) => logger.error('Failed to write NotificationLog for password reset', err));
 }
 
 export async function verifyResetOtp({ email, otp }) {

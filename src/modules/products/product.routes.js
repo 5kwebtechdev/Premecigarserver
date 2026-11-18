@@ -25,7 +25,7 @@ const XLSX_MIMES = new Set([
 ]);
 const xlsxUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const ok = XLSX_MIMES.has(file.mimetype) || /\.xlsx$/i.test(file.originalname);
     cb(ok ? null : new ApiError(400, 'Upload an .xlsx spreadsheet'), ok);
@@ -41,7 +41,7 @@ router.post(
   (req, res, next) =>
     xlsxUpload.single('file')(req, res, (err) => {
       if (err instanceof multer.MulterError) {
-        return next(new ApiError(400, err.code === 'LIMIT_FILE_SIZE' ? 'Spreadsheet must be 5 MB or smaller' : err.message));
+        return next(new ApiError(400, err.code === 'LIMIT_FILE_SIZE' ? 'Spreadsheet must be 50 MB or smaller' : err.message));
       }
       next(err);
     }),
