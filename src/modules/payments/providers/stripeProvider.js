@@ -34,10 +34,65 @@ export class StripePaymentProvider extends PaymentProvider {
       currency: 'usd',
       customer: providerCustomerId,
       setup_future_usage: 'off_session',
-      automatic_payment_methods: { enabled: true },
+      automatic_payment_methods: { enabled: true, allow_redirects: 'never' },
       metadata: stringify(meta),
     });
     return { paymentIntentId: intent.id, clientSecret: intent.client_secret };
+  }
+
+  /** Cards saved on the customer, newest first. */
+  async listCards(providerCustomerId) {
+    const res = await this.stripe.paymentMethods.list({ customer: providerCustomerId, type: 'card', limit: 20 });
+    return res.data.map(shapeCard);
+  }
+
+  /** A SetupIntent the browser confirms to attach a new card to the customer (no charge). */
+  async createCardSetupIntent(providerCustomerId) {
+    const intent = await this.stripe.setupIntents.create({
+      customer: providerCustomerId,
+      usage: 'off_session',
+      automatic_payment_methods: { enabled: true, allow_redirects: 'never' },
+    });
+    return { clientSecret: intent.client_secret };
+  }
+
+  /** Removes a saved card - only if it belongs to this customer. */
+  async detachCard(providerCustomerId, paymentMethodId) {
+    const pm = await this.stripe.paymentMethods.retrieve(paymentMethodId);
+    if (pm.customer !== providerCustomerId) return { success: false };
+    await this.stripe.paymentMethods.detach(paymentMethodId);
+    return { success: true };
+  }
+
+  /** Cart checkout step 1: a one-off PaymentIntent the browser confirms with Stripe.js. */
+  async createOrderIntent(amountCents, providerCustomerId, meta = {}) {
+    const intent = await this.stripe.paymentIntents.create({
+      amount: amountCents,
+      currency: 'usd',
+      customer: providerCustomerId,
+      // Methods come from the Stripe dashboard; redirect-based ones are excluded.
+      automatic_payment_methods: { enabled: true, allow_redirects: 'never' },
+      metadata: stringify(meta),
+    });
+    return { paymentIntentId: intent.id, clientSecret: intent.client_secret };
+  }
+
+  /**
+   * Cart checkout step 3: confirm the browser-confirmed intent really paid for
+   * this customer (and the right amount, when given). Does not touch the
+   * customer's default card. Throws a plain Error describing why it's invalid.
+   */
+  async verifyOrderIntent(paymentIntentId, { providerCustomerId, amountCents, metadata }) {
+    const intent = await this.stripe.paymentIntents.retrieve(paymentIntentId, { expand: ['payment_method'] });
+    if (intent.status !== 'succeeded') throw new Error(`Payment not completed (${intent.status})`);
+    if (intent.customer !== providerCustomerId) throw new Error('Payment belongs to a different customer');
+    if (amountCents != null && intent.amount_received !== amountCents) {
+      throw new Error('Payment amount does not match the order total');
+    }
+    for (const [key, value] of Object.entries(metadata ?? {})) {
+      if (intent.metadata?.[key] !== String(value)) throw new Error('Payment does not match this order');
+    }
+    return { providerRef: intent.id, paymentMethodLabel: labelFor(intent.payment_method) };
   }
 
   /**
@@ -116,6 +171,16 @@ export class StripePaymentProvider extends PaymentProvider {
     if (!env.stripeWebhookSecret) throw new Error('STRIPE_WEBHOOK_SECRET is not set');
     return this.stripe.webhooks.constructEvent(rawBody, signatureHeader, env.stripeWebhookSecret);
   }
+}
+
+function shapeCard(pm) {
+  return {
+    id: pm.id,
+    brand: pm.card?.brand ?? 'card',
+    last4: pm.card?.last4 ?? '••••',
+    expMonth: pm.card?.exp_month ?? null,
+    expYear: pm.card?.exp_year ?? null,
+  };
 }
 
 function stringify(obj) {

@@ -1,16 +1,7 @@
 import { z } from 'zod';
+import { ORDER_STATUS } from '../../config/constants.js';
 
-const ORDER_STATUSES = [
-  'PENDING_PAYMENT',
-  'PAID',
-  'PROCESSING',
-  'PACKED',
-  'SHIPPED',
-  'DELIVERED',
-  'CANCELLED',
-  'REFUNDED',
-  'FAILED',
-];
+const ORDER_STATUSES = Object.values(ORDER_STATUS);
 
 export const idParamSchema = z.object({
   params: z.object({ id: z.coerce.number().int().positive() }),
@@ -51,6 +42,9 @@ export const checkoutSchema = z.object({
       shipToBilling: z.coerce.boolean().optional().default(true),
       shippingAddressId: z.coerce.number().int().positive().optional(),
       shippingAddress: addressInput.optional(),
+      // Stripe: the PaymentIntent the browser already confirmed (required when Stripe is enabled).
+      paymentIntentId: z.string().min(1).max(255).optional(),
+      couponCode: z.string().trim().max(50).optional(),
       paymentMethod: z
         .object({
           type: z.enum(['card', 'paypal', 'applepay'], { required_error: 'Select a payment method' }),
@@ -70,6 +64,22 @@ export const checkoutSchema = z.object({
       }
       return v;
     }),
+});
+
+// POST /orders/checkout/intent — starts a Stripe payment for a cart.
+export const checkoutIntentSchema = z.object({
+  body: z.object({
+    couponCode: z.string().trim().max(50).optional(),
+    eventId: z.coerce.number().int().positive().optional(),
+    items: z
+      .array(
+        z.object({
+          productId: z.coerce.number().int().positive(),
+          quantity: z.coerce.number().int().positive().max(99),
+        })
+      )
+      .min(1, 'Your cart is empty'),
+  }),
 });
 
 export const updateStatusSchema = z.object({
@@ -94,3 +104,19 @@ export const listOrdersSchema = z.object({
 });
 
 export const ORDER_STATUS_VALUES = ORDER_STATUSES;
+
+// POST /orders/checkout/coupon — preview a coupon against a cart.
+export const couponPreviewSchema = z.object({
+  body: z.object({
+    couponCode: z.string().trim().min(1, 'Enter a coupon code').max(50),
+    eventId: z.coerce.number().int().positive().optional(),
+    items: z
+      .array(
+        z.object({
+          productId: z.coerce.number().int().positive(),
+          quantity: z.coerce.number().int().positive().max(99),
+        })
+      )
+      .min(1, 'Your cart is empty'),
+  }),
+});

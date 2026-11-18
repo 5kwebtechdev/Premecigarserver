@@ -1,6 +1,5 @@
 import { z } from 'zod';
 
-const PRODUCT_TYPES = ['SUBSCRIPTION_ITEM', 'ONE_TIME', 'ACCESSORY', 'MERCHANDISE', 'GIFT_MEMBERSHIP'];
 
 export const createProductSchema = z.object({
   body: z.object({
@@ -10,8 +9,6 @@ export const createProductSchema = z.object({
     price: z.coerce.number().nonnegative(),
     compareAtPrice: z.coerce.number().nonnegative().optional().nullable(),
     sku: z.string().optional(),
-    type: z.enum(PRODUCT_TYPES).default('ONE_TIME'),
-    isFeatured: z.coerce.boolean().optional(),
     isActive: z.coerce.boolean().optional(),
     categoryIds: z.array(z.coerce.number().int().positive()).optional().default([]),
     images: z
@@ -40,7 +37,6 @@ export const listProductsSchema = z.object({
     limit: z.string().optional(),
     search: z.string().optional(),
     categoryId: z.string().optional(),
-    type: z.enum(PRODUCT_TYPES).optional(),
     isActive: z.enum(['true', 'false']).optional(),
     sort: z.enum(PRODUCT_SORTS).optional(),
   }),

@@ -1,0 +1,7 @@
+-- Orders that were PACKED are now simply PROCESSING.
+UPDATE `orders` SET `status` = 'PROCESSING' WHERE `status` = 'PACKED';
+UPDATE `order_status_history` SET `status` = 'PROCESSING' WHERE `status` = 'PACKED';
+
+-- AlterTable
+ALTER TABLE `orders` MODIFY `status` ENUM('PENDING_PAYMENT', 'PAID', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'REFUNDED', 'FAILED') NOT NULL DEFAULT 'PENDING_PAYMENT';
+ALTER TABLE `order_status_history` MODIFY `status` ENUM('PENDING_PAYMENT', 'PAID', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'REFUNDED', 'FAILED') NOT NULL;

@@ -24,6 +24,7 @@ model User {
   firstName    String?
   lastName     String?
   phone        String?
+  avatarUrl    String?
   role         Role    @default(CUSTOMER)
 
   // Stripe Customer id (cus_...). Created lazily on first membership signup.
@@ -110,14 +111,6 @@ model Category {
   @@map("categories")
 }
 
-enum ProductType {
-  SUBSCRIPTION_ITEM
-  ONE_TIME
-  ACCESSORY
-  MERCHANDISE
-  GIFT_MEMBERSHIP
-}
-
 model Product {
   id             Int         @id @default(autoincrement())
   name           String
@@ -126,8 +119,6 @@ model Product {
   price          Decimal     @db.Decimal(10, 2)
   compareAtPrice Decimal?    @db.Decimal(10, 2)
   sku            String?     @unique
-  type           ProductType @default(ONE_TIME)
-  isFeatured     Boolean     @default(false)
   isActive       Boolean     @default(true)
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
@@ -306,7 +297,6 @@ enum OrderStatus {
   PENDING_PAYMENT
   PAID
   PROCESSING
-  PACKED
   SHIPPED
   DELIVERED
   CANCELLED
@@ -327,6 +317,7 @@ model Order {
   subtotal          Decimal     @db.Decimal(10, 2)
   tax               Decimal     @default(0) @db.Decimal(10, 2)
   shipping          Decimal     @default(0) @db.Decimal(10, 2)
+  discount          Decimal     @default(0) @db.Decimal(10, 2)
   total             Decimal     @db.Decimal(10, 2)
   shippingAddressId Int?
   billingAddressId  Int?

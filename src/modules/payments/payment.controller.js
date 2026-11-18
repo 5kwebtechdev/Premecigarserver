@@ -9,6 +9,17 @@ export const list = asyncHandler(async (req, res) => {
   res.json(await paymentService.list(req.query));
 });
 
+export const listMyCards = asyncHandler(async (req, res) => res.json(await paymentService.listMyCards(req.user.id)));
+
+export const createCardSetupIntent = asyncHandler(async (req, res) =>
+  res.json(await paymentService.createCardSetupIntent(req.user.id))
+);
+
+export const deleteMyCard = asyncHandler(async (req, res) => {
+  await paymentService.deleteMyCard(req.user.id, req.params.id);
+  res.status(204).end();
+});
+
 export const getById = asyncHandler(async (req, res) => {
   res.json({ payment: await paymentService.getById(Number(req.params.id)) });
 });

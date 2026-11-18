@@ -10,7 +10,6 @@ export const ORDER_STATUS = Object.freeze({
   PENDING_PAYMENT: 'PENDING_PAYMENT',
   PAID: 'PAID',
   PROCESSING: 'PROCESSING',
-  PACKED: 'PACKED',
   SHIPPED: 'SHIPPED',
   DELIVERED: 'DELIVERED',
   CANCELLED: 'CANCELLED',
@@ -22,11 +21,6 @@ export const ORDER_TYPE = Object.freeze({
   ONE_TIME: 'ONE_TIME',
   SUBSCRIPTION: 'SUBSCRIPTION',
 });
-
-// Product types a customer may buy individually (à la carte). SUBSCRIPTION_ITEM
-// cigars ship only inside membership boxes; GIFT_MEMBERSHIP isn't wired for
-// standalone sale yet.
-export const PURCHASABLE_PRODUCT_TYPES = ['ONE_TIME', 'ACCESSORY', 'MERCHANDISE'];
 
 export const SUBSCRIPTION_STATUS = Object.freeze({
   ACTIVE: 'ACTIVE',

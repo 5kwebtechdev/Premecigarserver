@@ -28,6 +28,11 @@ const listSchema = z.object({
 });
 const idParamSchema = z.object({ params: z.object({ id: z.coerce.number().int().positive() }) });
 
+// Customer: saved cards. Declared before the admin routes so '/methods' isn't read as an id.
+router.get('/methods', authenticate, paymentController.listMyCards);
+router.post('/methods/setup-intent', authenticate, paymentController.createCardSetupIntent);
+router.delete('/methods/:id', authenticate, paymentController.deleteMyCard);
+
 // Admin: payment ledger (read-only).
 router.get('/', authenticate, authorize(...ADMIN_ROLES), validate(listSchema), paymentController.list);
 router.get('/:id', authenticate, authorize(...ADMIN_ROLES), validate(idParamSchema), paymentController.getById);

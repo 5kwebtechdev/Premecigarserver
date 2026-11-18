@@ -183,13 +183,12 @@ export function orderConfirmationEmail({ user, order, lines, total }) {
 }
 
 // ── Subscription purchased ───────────────────────────────
-export function subscriptionWelcomeEmail({ user, plan, amount, nextBillingDate, shipQuantity, productName }) {
+export function subscriptionWelcomeEmail({ user, plan, amount, nextBillingDate }) {
   const name = user.firstName ? escapeHtml(user.firstName) : 'there';
   const bodyHtml = `
     <p style="margin:0 0 14px;">Hi ${name},</p>
     <p style="margin:0 0 14px;">
-      You're in — welcome to <strong>${escapeHtml(plan.name)}</strong>. Your first box
-      (${Number(shipQuantity)} &times; ${escapeHtml(productName)}) is being prepared and ships shortly.
+      You're in — welcome to <strong>${escapeHtml(plan.name)}</strong>. Your member pricing is active now.
     </p>
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:6px 0 4px;">
       <tr>
@@ -201,9 +200,9 @@ export function subscriptionWelcomeEmail({ user, plan, amount, nextBillingDate, 
         <td style="padding:8px 0;border-bottom:1px solid #eee;font-size:14px;color:#333;text-align:right;">${formatDate(nextBillingDate)}</td>
       </tr>
     </table>
-    <p style="margin:16px 0 0;">You can pause, skip a month, change your address, or cancel anytime from your account.</p>`;
+    <p style="margin:16px 0 0;">You can manage or cancel your membership anytime from your account.</p>`;
   return {
-    subject: `Welcome to ${plan.name} — your first box is on the way`,
+    subject: `Welcome to ${plan.name}`,
     html: renderLayout({
       previewText: `You joined ${plan.name}. Next charge ${formatDate(nextBillingDate)}.`,
       heading: `Welcome to ${escapeHtml(plan.name)}`,
@@ -211,8 +210,7 @@ export function subscriptionWelcomeEmail({ user, plan, amount, nextBillingDate, 
       cta: { label: 'Manage my membership', url: `${BRAND.web}/subscriptions` },
     }),
     text:
-      `Hi ${user.firstName || 'there'},\n\nWelcome to ${plan.name}. Your first box ` +
-      `(${shipQuantity} x ${productName}) is being prepared.\n\n` +
+      `Hi ${user.firstName || 'there'},\n\nWelcome to ${plan.name}. Your member pricing is active now.\n\n` +
       `Charged today: ${money(amount)}\nNext charge: ${formatDate(nextBillingDate)}\n\n` +
       `Manage your membership: ${BRAND.web}/subscriptions`,
   };

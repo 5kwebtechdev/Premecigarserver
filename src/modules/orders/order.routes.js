@@ -10,6 +10,8 @@ import {
   updateTrackingSchema,
   listOrdersSchema,
   checkoutSchema,
+  checkoutIntentSchema,
+  couponPreviewSchema,
   cancelOrderSchema,
 } from './order.validation.js';
 
@@ -17,6 +19,8 @@ const router = Router();
 
 // Customer routes. Declared before the admin guard below so they aren't
 // caught by the `authorize(ADMIN)` gate.
+router.post('/checkout/coupon', authenticate, validate(couponPreviewSchema), orderController.previewCoupon);
+router.post('/checkout/intent', authenticate, validate(checkoutIntentSchema), orderController.checkoutIntent);
 router.post('/checkout', authenticate, validate(checkoutSchema), orderController.checkout);
 router.get('/me', authenticate, validate(listOrdersSchema), orderController.listMine);
 router.get('/me/:id', authenticate, validate(idParamSchema), orderController.getMineById);
@@ -25,6 +29,7 @@ router.post('/me/:id/cancel', authenticate, validate(cancelOrderSchema), orderCo
 // Everything below is admin management only: list, view, status, tracking.
 router.use(authenticate, authorize(...ADMIN_ROLES));
 
+router.get('/statuses', orderController.statuses);
 router.get('/', validate(listOrdersSchema), orderController.list);
 router.get('/:id', validate(idParamSchema), orderController.getById);
 router.patch('/:id/status', validate(updateStatusSchema), orderController.updateStatus);

@@ -3,7 +3,6 @@ import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { notify } from '../modules/notifications/notification.service.js';
 import { membershipPaymentProvider as paymentProvider } from '../modules/payments/providers/index.js';
-import { createShipmentOrder } from '../modules/subscriptions/subscription.service.js';
 import { computeNextBillingDate } from '../modules/subscriptions/subscription.lifecycle.js';
 import {
   SUBSCRIPTION_STATUS,
@@ -145,11 +144,6 @@ async function billOne(sub, now) {
           status: PAYMENT_STATUS.SUCCEEDED,
         },
       });
-      if (plan.product) {
-        await createShipmentOrder(tx, { subscription: sub, plan, note: 'Monthly membership shipment' });
-      } else {
-        logger.warn(`[billing] subscription #${sub.id} plan has no cigar assigned — charged without a shipment`);
-      }
       await tx.subscription.update({
         where: { id: sub.id },
         data: {
@@ -166,8 +160,8 @@ async function billOne(sub, now) {
     await safeNotify(
       sub,
       NOTIFICATION_TYPE.SUBSCRIPTION_RENEWED,
-      `Your ${plan.name} box is on the way`,
-      `<p>We charged <strong>$${amount.toFixed(2)}</strong>. Your next shipment (${plan.shipQuantity} × ${plan.product?.name ?? 'cigars'}) is being prepared.</p>` +
+      `Your ${plan.name} membership has renewed`,
+      `<p>We charged <strong>$${amount.toFixed(2)}</strong> to renew your membership.</p>` +
         `<p>Next charge: <strong>${nextBillingDate.toDateString()}</strong>.</p>`
     );
     logger.info(`[billing] subscription #${sub.id} charged $${amount.toFixed(2)}`);

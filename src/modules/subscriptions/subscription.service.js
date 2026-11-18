@@ -58,65 +58,11 @@ async function loadForActor(id, actingUser, include = customerSubscriptionInclud
 }
 
 // ─────────────────────────────────────────────────────────
-// Shared: turn one paid billing cycle into a shipment order
-// ─────────────────────────────────────────────────────────
-// Runs inside a caller-supplied transaction. Creates the PAID order + line
-// item + status history and decrements the cigar's stock (best-effort — a
-// membership is still fulfilled if stock briefly goes to zero; we log it so
-// the low-stock job / admin can react).
-async function createShipmentOrder(tx, { subscription, plan, note }) {
-  const product = plan.product;
-  const quantity = plan.shipQuantity || 1;
-  const unitPrice = Number(product.price);
-  const subtotal = Number((unitPrice * quantity).toFixed(2));
-
-  const order = await tx.order.create({
-    data: {
-      userId: subscription.userId,
-      type: ORDER_TYPE.SUBSCRIPTION,
-      status: ORDER_STATUS.PAID,
-      subtotal,
-      tax: 0,
-      shipping: 0,
-      total: subtotal,
-      shippingAddressId: subscription.shippingAddressId ?? null,
-      billingAddressId: subscription.shippingAddressId ?? null,
-      subscriptionId: subscription.id,
-      items: { create: [{ productId: product.id, quantity, unitPrice }] },
-      statusHistory: { create: [{ status: ORDER_STATUS.PAID, note: note || 'Membership shipment' }] },
-    },
-    include: { items: true },
-  });
-
-  const inventory = await tx.inventory.findUnique({ where: { productId: product.id } });
-  if (inventory) {
-    const newQty = inventory.stockQty - quantity;
-    await tx.inventory.update({
-      where: { productId: product.id },
-      data: { stockQty: Math.max(0, newQty) },
-    });
-    if (newQty < 0) {
-      logger.warn(
-        `[subscriptions] shipment order #${order.id} oversold "${product.name}" by ${-newQty} — needs restock`
-      );
-    }
-  }
-
-  return order;
-}
-
-// ─────────────────────────────────────────────────────────
 // Customer: join a plan
 // ─────────────────────────────────────────────────────────
 export async function subscribe(userId, dto) {
-  const plan = await prisma.membershipPlan.findUnique({
-    where: { id: dto.planId },
-    include: { product: { include: { inventory: true } } },
-  });
+  const plan = await prisma.membershipPlan.findUnique({ where: { id: dto.planId } });
   if (!plan || !plan.isActive) throw ApiError.badRequest('That membership plan is not available');
-  if (!plan.productId || !plan.product) {
-    throw ApiError.badRequest('This plan is not ready to accept members yet (no cigar assigned)');
-  }
 
   const existing = await prisma.subscription.findFirst({
     where: { userId, status: { in: NON_TERMINAL_SUBSCRIPTION_STATUSES } },
@@ -222,22 +168,12 @@ export async function subscribe(userId, dto) {
       },
     });
 
-    const order = await createShipmentOrder(tx, {
-      subscription,
-      plan,
-      note: 'First membership shipment',
-    });
-
-    return { subscriptionId: subscription.id, orderId: order.id };
+    return { subscriptionId: subscription.id };
   });
 
   const subscription = await prisma.subscription.findUnique({
     where: { id: created.subscriptionId },
     include: customerSubscriptionInclude,
-  });
-  const order = await prisma.order.findUnique({
-    where: { id: created.orderId },
-    include: { items: { include: { product: { select: { id: true, name: true, slug: true } } } } },
   });
 
   const mail = subscriptionWelcomeEmail({
@@ -245,8 +181,6 @@ export async function subscribe(userId, dto) {
     plan,
     amount,
     nextBillingDate,
-    shipQuantity: plan.shipQuantity || 1,
-    productName: plan.product.name,
   });
   await notify({
     userId,
@@ -257,7 +191,7 @@ export async function subscribe(userId, dto) {
     text: mail.text,
   }).catch((err) => logger.error(`[subscriptions] welcome email failed for ${user.email}`, err));
 
-  return { subscription: shapeCustomer(subscription), order };
+  return { subscription: shapeCustomer(subscription) };
 }
 
 // Stripe signup step 1: create the PaymentIntent the browser will confirm.
@@ -265,7 +199,7 @@ export async function subscribe(userId, dto) {
 export async function createSignupIntent(userId, planId) {
   if (!stripeEnabled) throw ApiError.badRequest('Online card payments are not enabled');
   const plan = await prisma.membershipPlan.findUnique({ where: { id: planId } });
-  if (!plan || !plan.isActive || !plan.productId) throw ApiError.badRequest('That membership plan is not available');
+  if (!plan || !plan.isActive) throw ApiError.badRequest('That membership plan is not available');
 
   const existing = await prisma.subscription.findFirst({
     where: { userId, status: { in: NON_TERMINAL_SUBSCRIPTION_STATUSES } },
@@ -305,15 +239,6 @@ function shapeCustomer(subscription) {
   const { plan } = subscription;
   return {
     ...subscription,
-    nextShipment:
-      subscription.status === SUBSCRIPTION_STATUS.CANCELLED || subscription.status === SUBSCRIPTION_STATUS.EXPIRED
-        ? null
-        : {
-            productName: plan?.product?.name ?? null,
-            quantity: plan?.shipQuantity ?? 1,
-            estimatedChargeOn: subscription.nextBillingDate,
-            skipped: subscription.skipNextCycle,
-          },
   };
 }
 
@@ -426,7 +351,7 @@ export async function update(id, actingUser, { shippingAddressId, planId }) {
 
   if (planId !== undefined && planId !== subscription.planId) {
     const plan = await prisma.membershipPlan.findUnique({ where: { id: Number(planId) } });
-    if (!plan || !plan.isActive || !plan.productId) {
+    if (!plan || !plan.isActive) {
       throw ApiError.badRequest('That plan is not available');
     }
     // Plan change takes effect on the next billing date at the new price.
@@ -552,4 +477,3 @@ export async function getMetrics() {
 }
 
 // Re-export for the billing job.
-export { createShipmentOrder };

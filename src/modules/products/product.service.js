@@ -4,7 +4,6 @@ import { slugify } from '../../utils/slugify.js';
 import { parsePagination, paginatedResponse } from '../../utils/pagination.js';
 import { logger } from '../../utils/logger.js';
 
-const PRODUCT_TYPES = ['SUBSCRIPTION_ITEM', 'ONE_TIME', 'ACCESSORY', 'MERCHANDISE', 'GIFT_MEMBERSHIP'];
 const IMPORT_ROW_LIMIT = 2000;
 
 const includeDefault = {
@@ -36,18 +35,13 @@ const SORT_ORDER_BY = {
   nameAsc: [{ name: 'asc' }, { id: 'asc' }],
 };
 
-// Free-text search across name, SKU, product type, and exact price.
-// (Prisma enum + Decimal columns don't support `contains`, so type is matched
-// against the enum values and price is an exact numeric match.)
+// Free-text search across name, SKU, and exact price (Decimal columns don't
+// support `contains`, so price is an exact numeric match).
 function buildSearchWhere(search) {
   const term = String(search ?? '').trim();
   if (!term) return {};
 
   const or = [{ name: { contains: term } }, { sku: { contains: term } }];
-
-  const typeNeedle = term.toUpperCase().replace(/[\s-]+/g, '_');
-  const typeMatches = PRODUCT_TYPES.filter((t) => t.includes(typeNeedle));
-  if (typeMatches.length > 0) or.push({ type: { in: typeMatches } });
 
   const asNumber = Number(term.replace(/[$,\s]/g, ''));
   if (Number.isFinite(asNumber)) or.push({ price: asNumber });
@@ -55,11 +49,10 @@ function buildSearchWhere(search) {
   return { OR: or };
 }
 
-export async function list({ page, limit, search, categoryId, type, isActive, sort }) {
+export async function list({ page, limit, search, categoryId, isActive, sort }) {
   const pagination = parsePagination({ page, limit });
   const where = {
     ...buildSearchWhere(search),
-    ...(type ? { type } : {}),
     ...(isActive !== undefined ? { isActive: isActive === 'true' } : {}),
     ...(categoryId ? { categories: { some: { categoryId: Number(categoryId) } } } : {}),
   };
@@ -142,7 +135,7 @@ export async function create(data) {
   });
 }
 
-export async function update(id, data) {
+export async function update(id, data, actorUserId) {
   await getById(id);
   const { categoryIds, images, initialStockQty, lowStockThreshold, ...rest } = data;
   const patch = { ...rest };
@@ -162,6 +155,29 @@ export async function update(id, data) {
     if (images) {
       await tx.productImage.deleteMany({ where: { productId: id } });
       await tx.productImage.createMany({ data: images.map((img) => ({ ...img, productId: id })) });
+    }
+
+    // Stock: on edit, `initialStockQty` is the new quantity on hand. A change is logged as an adjustment.
+    if (initialStockQty !== undefined || lowStockThreshold !== undefined) {
+      const inv = await tx.inventory.findUnique({ where: { productId: id } });
+      const nextStock = initialStockQty ?? inv?.stockQty ?? 0;
+      const nextThreshold = lowStockThreshold ?? inv?.lowStockThreshold ?? 5;
+      const saved = await tx.inventory.upsert({
+        where: { productId: id },
+        create: { productId: id, sku: rest.sku ?? null, stockQty: nextStock, lowStockThreshold: nextThreshold },
+        update: { stockQty: nextStock, lowStockThreshold: nextThreshold },
+      });
+      const before = inv?.stockQty ?? 0;
+      if (nextStock !== before) {
+        await tx.inventoryAdjustment.create({
+          data: {
+            inventoryId: saved.id,
+            changeQty: nextStock - before,
+            reason: 'Edited in admin',
+            adjustedByUserId: actorUserId ?? null,
+          },
+        });
+      }
     }
   });
 
@@ -203,8 +219,6 @@ export async function getExportRows() {
     price: Number(p.price),
     compareAtPrice: p.compareAtPrice == null ? '' : Number(p.compareAtPrice),
     sku: p.sku ?? '',
-    type: p.type,
-    isFeatured: p.isFeatured ? 'TRUE' : 'FALSE',
     isActive: p.isActive ? 'TRUE' : 'FALSE',
     categories: p.categories.map((c) => c.category.name).join(', '),
     imageUrls: p.images.map((i) => i.url).join(', '),
@@ -330,17 +344,6 @@ async function importOneRow(row, actorUserId, createdCategories) {
       }
     }
 
-    if (row.type !== undefined && String(row.type).trim()) {
-      const type = String(row.type).trim().toUpperCase();
-      if (!PRODUCT_TYPES.includes(type)) throw new Error(`type "${row.type}" is not one of ${PRODUCT_TYPES.join(', ')}`);
-      data.type = type;
-    } else if (!existing) {
-      data.type = 'ONE_TIME';
-    }
-
-    if (row.isFeatured !== undefined && String(row.isFeatured).trim() !== '') {
-      data.isFeatured = parseBool(row.isFeatured, false);
-    }
     if (row.isActive !== undefined && String(row.isActive).trim() !== '') {
       data.isActive = parseBool(row.isActive, true);
     }

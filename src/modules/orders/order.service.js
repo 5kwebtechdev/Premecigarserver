@@ -1,3 +1,4 @@
+import * as couponService from '../coupons/coupon.service.js';
 import { prisma } from '../../config/db.js';
 import { ApiError } from '../../utils/ApiError.js';
 import { parsePagination, paginatedResponse } from '../../utils/pagination.js';
@@ -6,7 +7,6 @@ import {
   ORDER_STATUS,
   ORDER_TYPE,
   PAYMENT_STATUS,
-  PURCHASABLE_PRODUCT_TYPES,
   NOTIFICATION_TYPE,
   SUBSCRIPTION_STATUS,
 } from '../../config/constants.js';
@@ -14,7 +14,12 @@ import { isSaleOpen } from '../events/event.service.js';
 import { notify } from '../notifications/notification.service.js';
 import { orderConfirmationEmail } from '../notifications/email.templates.js';
 import * as addressService from '../addresses/address.service.js';
-import { paymentProvider } from '../payments/providers/stubProvider.js';
+import { paymentProvider as stubProvider } from '../payments/providers/stubProvider.js';
+import { membershipPaymentProvider, stripeEnabled } from '../payments/providers/index.js';
+
+// Stripe when configured (test or live keys), otherwise the in-memory stub.
+const paymentProvider = stripeEnabled ? membershipPaymentProvider : stubProvider;
+const providerFor = (name) => (name === 'stripe' ? membershipPaymentProvider : stubProvider);
 
 const includeDefault = {
   user: { select: { id: true, email: true, firstName: true, lastName: true } },
@@ -38,7 +43,8 @@ const includeDefault = {
 // ─────────────────────────────────────────────────────────
 export async function listMine(userId, { page, limit, status }) {
   const pagination = parsePagination({ page, limit });
-  const where = { userId, ...(status ? { status } : {}) };
+  // Order history is purchases only - membership shipments live under My Subscriptions.
+  const where = { userId, type: 'ONE_TIME', ...(status ? { status } : {}) };
 
   const [items, total] = await Promise.all([
     prisma.order.findMany({
@@ -66,9 +72,9 @@ export async function getMineById(userId, id) {
 }
 
 // ─────────────────────────────────────────────────────────
-// Customer: à-la-carte checkout (buy ONE_TIME / ACCESSORY / MERCHANDISE
-// products without a membership). Memberships still go through the
-// subscription engine — this path never creates a subscription.
+// Customer: à-la-carte checkout (members buy products directly, or through an
+// event for a discount). Memberships go through the subscription engine —
+// this path never creates a subscription.
 // ─────────────────────────────────────────────────────────
 // Customers may cancel only before the order is packed/shipped.
 const CUSTOMER_CANCELLABLE = [ORDER_STATUS.PENDING_PAYMENT, ORDER_STATUS.PAID, ORDER_STATUS.PROCESSING];
@@ -110,7 +116,7 @@ export async function cancelMine(userId, id, reason) {
   });
 
   if (wasCharged) {
-    await paymentProvider
+    await providerFor(order.payment.provider)
       .refund(order.payment.providerRef, Math.round(Number(order.total) * 100))
       .catch((err) => logger.error(`[orders] refund failed for #${id}`, err));
   }
@@ -118,7 +124,9 @@ export async function cancelMine(userId, id, reason) {
   return getMineById(userId, id);
 }
 
-export async function checkout(userId, dto) {
+// Validates membership, event rules, stock and prices for a cart. Shared by the
+// Stripe intent step and the final checkout so both see the same total.
+async function prepareCart(userId, dto) {
   // 0. Buying products always needs an active membership. Members get their
   // plan's discount on every product; an event is optional and, when used,
   // restricts the cart to that event's products on its sale day (the better of
@@ -163,9 +171,6 @@ export async function checkout(userId, dto) {
     if (eventProductIds && !eventProductIds.has(product.id)) {
       throw ApiError.badRequest(`${product.name} isn't part of this event`);
     }
-    if (!PURCHASABLE_PRODUCT_TYPES.includes(product.type)) {
-      throw ApiError.badRequest(`${product.name} can only be received through a membership`);
-    }
     const available = product.inventory?.stockQty ?? 0;
     if (available < line.quantity) {
       throw ApiError.conflict(
@@ -180,7 +185,67 @@ export async function checkout(userId, dto) {
   });
 
   const subtotal = Number(lines.reduce((sum, l) => sum + l.unitPrice * l.quantity, 0).toFixed(2));
-  const total = subtotal; // free shipping, no tax for now
+
+  // Optional coupon, validated for this user against the server-computed subtotal.
+  let coupon = null;
+  let discount = 0;
+  if (dto.couponCode) {
+    ({ coupon, discount } = await couponService.evaluate(userId, dto.couponCode, subtotal));
+  }
+  const total = Number((subtotal - discount).toFixed(2)); // free shipping, no tax for now
+
+  return { event, lines, subtotal, discount, coupon, total };
+}
+
+// Checks a coupon against the cart and returns what it would take off.
+export async function previewCoupon(userId, dto) {
+  const { subtotal, discount, total } = await prepareCart(userId, dto);
+  return { code: String(dto.couponCode).trim().toUpperCase(), subtotal, discount, total };
+}
+
+// Stripe step 1: PaymentIntent for this cart's server-computed total.
+export async function createCheckoutIntent(userId, dto) {
+  if (!stripeEnabled) throw ApiError.badRequest('Online card payments are not enabled');
+  const { event, total } = await prepareCart(userId, dto);
+
+  let user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user.stripeCustomerId) {
+    const { providerCustomerId } = await paymentProvider.createCustomer(user);
+    user = await prisma.user.update({ where: { id: userId }, data: { stripeCustomerId: providerCustomerId } });
+  }
+  const { clientSecret, paymentIntentId } = await paymentProvider.createOrderIntent(
+    Math.round(total * 100),
+    user.stripeCustomerId,
+    { kind: 'one_time_order', userId, eventId: event?.id ?? '' }
+  );
+  return { clientSecret, paymentIntentId, amount: total };
+}
+
+// Best-effort refund when a paid Stripe intent can't be turned into an order.
+async function refundPaidIntent(userId, paymentIntentId) {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user?.stripeCustomerId) return;
+    const verified = await paymentProvider.verifyOrderIntent(paymentIntentId, {
+      providerCustomerId: user.stripeCustomerId,
+      metadata: { kind: 'one_time_order', userId },
+    });
+    await paymentProvider.refund(verified.providerRef);
+  } catch (err) {
+    logger.error(`[orders] could not refund unused payment ${paymentIntentId}`, err);
+  }
+}
+
+export async function checkout(userId, dto) {
+  let prepared;
+  try {
+    prepared = await prepareCart(userId, dto);
+  } catch (err) {
+    // Paid in the browser but the cart no longer checks out (e.g. stock ran out): give the money back.
+    if (stripeEnabled && dto.paymentIntentId) await refundPaidIntent(userId, dto.paymentIntentId);
+    throw err;
+  }
+  const { event, lines, subtotal, discount, coupon, total } = prepared;
 
   // 2. Resolve addresses.
   const user = await prisma.user.findUnique({ where: { id: userId } });
@@ -197,13 +262,35 @@ export async function checkout(userId, dto) {
   }
 
   // 3. Charge, then persist atomically.
-  const { providerCustomerId } = await paymentProvider.createCustomer(user);
-  const charge = await paymentProvider.charge(Math.round(total * 100), providerCustomerId, {
-    kind: 'one_time_order',
-    userId,
-  });
-  if (!charge.success) {
-    throw ApiError.badRequest('Your payment was declined. Please try a different payment method.');
+  let charge;
+  if (stripeEnabled) {
+    // The browser already paid via Stripe.js; verify that payment server-side.
+    if (!dto.paymentIntentId) throw ApiError.badRequest('Payment is required to place this order');
+    const buyer = await prisma.user.findUnique({ where: { id: userId } });
+    if (!buyer.stripeCustomerId) throw ApiError.badRequest('Start checkout again to place this order');
+    try {
+      const verified = await paymentProvider.verifyOrderIntent(dto.paymentIntentId, {
+        providerCustomerId: buyer.stripeCustomerId,
+        amountCents: Math.round(total * 100),
+        metadata: { kind: 'one_time_order', userId },
+      });
+      charge = { success: true, providerRef: verified.providerRef };
+    } catch (err) {
+      logger.warn(`[orders] stripe verification failed for user ${userId}: ${err.message}`);
+      throw ApiError.badRequest('We could not confirm your payment. Please try again.');
+    }
+    // A reused intent must not create a second order.
+    const reused = await prisma.payment.findFirst({ where: { providerRef: charge.providerRef } });
+    if (reused) throw ApiError.conflict('That payment has already been used');
+  } else {
+    const { providerCustomerId } = await paymentProvider.createCustomer(user);
+    charge = await paymentProvider.charge(Math.round(total * 100), providerCustomerId, {
+      kind: 'one_time_order',
+      userId,
+    });
+    if (!charge.success) {
+      throw ApiError.badRequest('Your payment was declined. Please try a different payment method.');
+    }
   }
 
   const orderId = await prisma.$transaction(async (tx) => {
@@ -216,6 +303,7 @@ export async function checkout(userId, dto) {
         subtotal,
         tax: 0,
         shipping: 0,
+        discount,
         total,
         shippingAddressId: shippingAddress.id,
         billingAddressId: billingAddress.id,
@@ -230,10 +318,14 @@ export async function checkout(userId, dto) {
       },
     });
 
+    if (coupon) {
+      await tx.couponUsage.create({ data: { couponId: coupon.id, userId, orderId: order.id } });
+    }
+
     await tx.payment.create({
       data: {
         orderId: order.id,
-        provider: 'stub',
+        provider: paymentProvider.name,
         providerRef: charge.providerRef,
         amount: total,
         status: PAYMENT_STATUS.SUCCEEDED,

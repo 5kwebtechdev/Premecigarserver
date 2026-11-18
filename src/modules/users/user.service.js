@@ -12,6 +12,7 @@ const PUBLIC_USER_FIELDS = {
   firstName: true,
   lastName: true,
   phone: true,
+  avatarUrl: true,
   role: true,
   emailVerified: true,
   isActive: true,

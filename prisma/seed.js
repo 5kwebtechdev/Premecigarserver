@@ -17,7 +17,6 @@ const CIGARS = [
     description:
       'A refined, medium-full flagship. Ecuadorian Habano wrapper over Nicaraguan long-leaf — cedar, cocoa, and a clean, elegant finish.',
     image: 'https://images.unsplash.com/photo-1601001435957-74f0958a93c7?w=900&q=80',
-    featured: true,
   },
   {
     slug: 'black-label',
@@ -27,7 +26,6 @@ const CIGARS = [
     description:
       'The reserve-tier headliner. A darker, oily Maduro wrapper, aged fillers, and a rich espresso-and-dark-chocolate core.',
     image: 'https://images.unsplash.com/photo-1568149253762-4c0e7c1b1e6b?w=900&q=80',
-    featured: true,
   },
   {
     slug: 'grand-toro',
@@ -37,7 +35,6 @@ const CIGARS = [
     description:
       'A generous 6" x 52 toro built for a slow evening. Balanced, creamy, with toasted nuts and a touch of white pepper.',
     image: 'https://images.unsplash.com/photo-1613743983303-b3e89f8a2b80?w=900&q=80',
-    featured: true,
   },
   {
     slug: 'heritage',
@@ -47,7 +44,6 @@ const CIGARS = [
     description:
       'Our small-batch tribute blend. Rotated through PREME boxes seasonally — leather, dried fruit, and sweet cedar.',
     image: 'https://images.unsplash.com/photo-1544896478-d5b2d9a6a1a0?w=900&q=80',
-    featured: false,
   },
 ];
 
@@ -139,8 +135,6 @@ async function upsertCigar(cigar, categoryId) {
       description: cigar.description,
       price: cigar.price,
       sku: cigar.sku,
-      type: 'SUBSCRIPTION_ITEM',
-      isFeatured: cigar.featured,
       isActive: true,
     },
     create: {
@@ -149,8 +143,6 @@ async function upsertCigar(cigar, categoryId) {
       description: cigar.description,
       price: cigar.price,
       sku: cigar.sku,
-      type: 'SUBSCRIPTION_ITEM',
-      isFeatured: cigar.featured,
       isActive: true,
       categories: { create: [{ categoryId }] },
     },

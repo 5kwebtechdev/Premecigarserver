@@ -26,7 +26,7 @@ export const create = asyncHandler(async (req, res) => {
 });
 
 export const update = asyncHandler(async (req, res) => {
-  res.json({ product: await productService.update(Number(req.params.id), req.body) });
+  res.json({ product: await productService.update(Number(req.params.id), req.body, req.user?.id) });
 });
 
 export const remove = asyncHandler(async (req, res) => {
