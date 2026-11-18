@@ -370,9 +370,22 @@ export async function checkout(userId, dto) {
   return { order: created };
 }
 
-export async function list({ page, limit, status }) {
+export async function list({ page, limit, status, period }) {
   const pagination = parsePagination({ page, limit });
-  const where = status ? { status } : {};
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+  const cancelledThisMonth = period === 'month' && status === ORDER_STATUS.CANCELLED;
+  const where = {
+    // "Cancelled this month" matches the dashboard count: orders cancelled this month, whatever their status is now.
+    ...(status && !cancelledThisMonth ? { status } : {}),
+    ...(period === 'month'
+      ? cancelledThisMonth
+        ? // Orders have no cancelledAt - the status history records when each one was cancelled.
+          { statusHistory: { some: { status: ORDER_STATUS.CANCELLED, changedAt: { gte: monthStart } } } }
+        : { placedAt: { gte: monthStart } }
+      : {}),
+  };
 
   const [items, total] = await Promise.all([
     prisma.order.findMany({

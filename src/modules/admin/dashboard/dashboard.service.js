@@ -15,6 +15,13 @@ export async function getMetrics() {
   startOfMonth.setDate(1);
   startOfMonth.setHours(0, 0, 0, 0);
 
+  const startOfLastMonth = new Date(startOfMonth);
+  startOfLastMonth.setMonth(startOfLastMonth.getMonth() - 1);
+  const fourteenDaysAgo = new Date(startOfToday);
+  fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 13);
+  const sixMonthsAgo = new Date(startOfMonth);
+  sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 5);
+
   const [
     totalCustomers,
     ordersToday,
@@ -31,6 +38,14 @@ export async function getMetrics() {
     inventoryRows,
     revenueMonthAgg,
     revenueTotalAgg,
+    revenueLastMonthAgg,
+    newSubsLastMonth,
+    recentOrdersRaw,
+    statusGroups,
+    revenueRows,
+    subscriptionRows,
+    lowStockProducts,
+    scheduledUpgrades,
   ] = await Promise.all([
     prisma.user.count({ where: { role: 'CUSTOMER' } }),
     prisma.order.count({ where: { placedAt: { gte: startOfToday } } }),
@@ -58,12 +73,81 @@ export async function getMetrics() {
     // Product sales revenue: paid orders that haven't been cancelled / refunded / failed.
     prisma.order.aggregate({ _sum: { total: true }, where: { ...REVENUE_WHERE, placedAt: { gte: startOfMonth } } }),
     prisma.order.aggregate({ _sum: { total: true }, where: REVENUE_WHERE }),
+    prisma.order.aggregate({ _sum: { total: true }, where: { ...REVENUE_WHERE, placedAt: { gte: startOfLastMonth, lt: startOfMonth } } }),
+    prisma.subscription.count({ where: { createdAt: { gte: startOfLastMonth, lt: startOfMonth } } }),
+    prisma.order.findMany({
+      orderBy: { placedAt: 'desc' },
+      take: 6,
+      select: { id: true, total: true, status: true, placedAt: true, user: { select: { firstName: true, lastName: true, email: true } } },
+    }),
+    prisma.order.groupBy({ by: ['status'], _count: { _all: true } }),
+    // Sales for the last 14 days (summed per day below).
+    prisma.order.findMany({ where: { ...REVENUE_WHERE, placedAt: { gte: fourteenDaysAgo } }, select: { total: true, placedAt: true } }),
+    // New memberships over the last 6 months (counted per month below).
+    prisma.subscription.findMany({ where: { createdAt: { gte: sixMonthsAgo } }, select: { createdAt: true } }),
+    prisma.inventory.findMany({
+      where: { product: { isActive: true } },
+      orderBy: { stockQty: 'asc' },
+      take: 25,
+      select: { stockQty: true, lowStockThreshold: true, product: { select: { id: true, name: true } } },
+    }),
+    prisma.subscription.count({ where: { status: SUBSCRIPTION_STATUS.ACTIVE, pendingPlanId: { not: null } } }),
   ]);
 
   const lowStockCount = inventoryRows.filter((i) => i.stockQty <= i.lowStockThreshold).length;
   const mrr = Number(
     activePlanPrices.reduce((sum, s) => sum + monthlyEquivalentPrice(s.plan), 0).toFixed(2)
   );
+
+  // Sales per day (zero-filled so the chart has no gaps).
+  const pad = (n) => String(n).padStart(2, '0');
+  const dayKey = (d) => {
+    const x = new Date(d);
+    return `${x.getFullYear()}-${pad(x.getMonth() + 1)}-${pad(x.getDate())}`;
+  };
+  const monthKey = (d) => {
+    const x = new Date(d);
+    return `${x.getFullYear()}-${pad(x.getMonth() + 1)}`;
+  };
+  const salesByDay = [];
+  for (let i = 0; i < 14; i++) {
+    const d = new Date(fourteenDaysAgo);
+    d.setDate(d.getDate() + i);
+    salesByDay.push({ date: dayKey(d), total: 0, orders: 0 });
+  }
+  for (const o of revenueRows) {
+    const row = salesByDay.find((r) => r.date === dayKey(o.placedAt));
+    if (row) {
+      row.total = Number((row.total + Number(o.total)).toFixed(2));
+      row.orders += 1;
+    }
+  }
+
+  // New memberships per month for the last 6 months.
+  const membersByMonth = [];
+  for (let i = 0; i < 6; i++) {
+    const d = new Date(sixMonthsAgo);
+    d.setMonth(d.getMonth() + i);
+    membersByMonth.push({ month: monthKey(d), count: 0 });
+  }
+  for (const s of subscriptionRows) {
+    const key = monthKey(s.createdAt);
+    const row = membersByMonth.find((r) => r.month === key);
+    if (row) row.count += 1;
+  }
+
+  const ordersByStatus = statusGroups.map((g) => ({ status: g.status, count: g._count._all }));
+  const recentOrders = recentOrdersRaw.map((o) => ({
+    id: o.id,
+    total: Number(o.total),
+    status: o.status,
+    placedAt: o.placedAt,
+    customer: [o.user?.firstName, o.user?.lastName].filter(Boolean).join(' ') || o.user?.email || 'Customer',
+  }));
+  const lowStockItems = lowStockProducts
+    .filter((i) => i.stockQty <= i.lowStockThreshold)
+    .slice(0, 5)
+    .map((i) => ({ productId: i.product.id, name: i.product.name, stockQty: i.stockQty, threshold: i.lowStockThreshold }));
 
   // MRR per plan, biggest first.
   const byPlan = new Map();
@@ -79,6 +163,14 @@ export async function getMetrics() {
 
   return {
     mrrByPlan,
+    scheduledUpgrades,
+    salesByDay,
+    membersByMonth,
+    ordersByStatus,
+    recentOrders,
+    lowStockItems,
+    salesRevenueLastMonth: Number(revenueLastMonthAgg._sum.total ?? 0),
+    newSubscriptionsLastMonth: newSubsLastMonth,
     salesRevenueThisMonth: Number(revenueMonthAgg._sum.total ?? 0),
     salesRevenueTotal: Number(revenueTotalAgg._sum.total ?? 0),
     totalCustomers,

@@ -49,9 +49,18 @@ function buildSearchWhere(search) {
   return { OR: or };
 }
 
-export async function list({ page, limit, search, categoryId, isActive, sort }) {
+export async function list({ page, limit, search, categoryId, isActive, sort, stock }) {
   const pagination = parsePagination({ page, limit });
+  let lowStockIds = null;
+  if (stock === 'low') {
+    // Prisma can't compare two columns, so pick the ids with a small raw query.
+    const rows = await prisma.$queryRaw`
+      SELECT i.productId FROM inventory i JOIN products p ON p.id = i.productId
+      WHERE p.isActive = 1 AND i.stockQty <= i.lowStockThreshold`;
+    lowStockIds = rows.map((r) => Number(r.productId));
+  }
   const where = {
+    ...(lowStockIds ? { id: { in: lowStockIds } } : {}),
     ...buildSearchWhere(search),
     ...(isActive !== undefined ? { isActive: isActive === 'true' } : {}),
     ...(categoryId ? { categories: { some: { categoryId: Number(categoryId) } } } : {}),

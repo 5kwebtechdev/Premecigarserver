@@ -39,6 +39,8 @@ export const listProductsSchema = z.object({
     categoryId: z.string().optional(),
     isActive: z.enum(['true', 'false']).optional(),
     sort: z.enum(PRODUCT_SORTS).optional(),
+    // 'low' = at or below the low-stock threshold
+    stock: z.enum(['low']).optional(),
   }),
 });
 

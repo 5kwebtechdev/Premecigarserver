@@ -23,6 +23,10 @@ export const listSubscriptionsSchema = z.object({
     limit: z.string().optional(),
     search: z.string().optional(),
     status: z.enum(STATUSES).optional(),
+    // 'month' = cancelled this month (with status=CANCELLED)
+    period: z.enum(['month']).optional(),
+    // 'scheduled' = members who have an upgrade waiting for their next billing date
+    upgrade: z.enum(['scheduled']).optional(),
   }),
 });
 

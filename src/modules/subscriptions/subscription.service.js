@@ -555,10 +555,15 @@ async function notifySubscriber(subscription, type, { subject, body }) {
 // ─────────────────────────────────────────────────────────
 // Admin: list / detail / metrics
 // ─────────────────────────────────────────────────────────
-export async function list({ page, limit, status, search }) {
+export async function list({ page, limit, status, search, period, upgrade }) {
   const pagination = parsePagination({ page, limit });
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
   const where = {
     ...(status ? { status } : {}),
+    ...(period === 'month' && status === SUBSCRIPTION_STATUS.CANCELLED ? { cancelledAt: { gte: monthStart } } : {}),
+    ...(upgrade === 'scheduled' ? { pendingPlanId: { not: null }, status: SUBSCRIPTION_STATUS.ACTIVE } : {}),
     ...(search
       ? {
           user: {
@@ -586,13 +591,13 @@ export async function list({ page, limit, status, search }) {
     prisma.subscription.count({ where }),
   ]);
 
-  return paginatedResponse({ items, total, page: pagination.page, limit: pagination.limit });
+  return paginatedResponse({ items: await withPendingPlans(items), total, page: pagination.page, limit: pagination.limit });
 }
 
 export async function getById(id) {
   const subscription = await prisma.subscription.findUnique({ where: { id }, include: adminSubscriptionInclude });
   if (!subscription) throw ApiError.notFound('Subscription not found');
-  return subscription;
+  return (await withPendingPlans([subscription]))[0];
 }
 
 export async function getMetrics() {

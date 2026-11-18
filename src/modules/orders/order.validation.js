@@ -100,6 +100,8 @@ export const listOrdersSchema = z.object({
     page: z.string().optional(),
     limit: z.string().optional(),
     status: z.enum(ORDER_STATUSES).optional(),
+    // 'month' = this month (cancelled this month when status=CANCELLED)
+    period: z.enum(['month']).optional(),
   }),
 });
 
