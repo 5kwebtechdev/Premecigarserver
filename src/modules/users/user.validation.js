@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { dobSchema } from '../auth/auth.validation.js';
 
 export const updateProfileSchema = z.object({
   body: z.object({
@@ -6,6 +7,16 @@ export const updateProfileSchema = z.object({
     lastName: z.string().min(1).optional(),
     phone: z.string().optional(),
     avatarUrl: z.string().max(500).nullable().optional(),
+    // Accepted only once, for accounts that don't have a date of birth saved yet.
+    dateOfBirth: dobSchema.optional(),
+    emailPreferences: z
+      .object({
+        orderUpdates: z.boolean(),
+        subscriptionUpdates: z.boolean(),
+        promotions: z.boolean(),
+        eventsNotification: z.boolean(),
+      })
+      .optional(),
   }),
 });
 

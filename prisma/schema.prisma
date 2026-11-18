@@ -25,6 +25,10 @@ model User {
   lastName     String?
   phone        String?
   avatarUrl    String?
+  // Entered once at sign-up (21+ only); never editable afterwards.
+  dateOfBirth  DateTime? @db.Date
+  // { orderUpdates, subscriptionUpdates, promotions, eventsNotification } - null = defaults
+  emailPreferences Json?
   role         Role    @default(CUSTOMER)
 
   // Stripe Customer id (cus_...). Created lazily on first membership signup.

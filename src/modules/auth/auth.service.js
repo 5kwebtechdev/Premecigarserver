@@ -25,7 +25,7 @@ function toPublicUser(user) {
   return publicUser;
 }
 
-export async function register({ email, password, firstName, lastName, phone }) {
+export async function register({ email, password, firstName, lastName, phone, dateOfBirth }) {
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) {
     throw ApiError.conflict('An account with this email already exists');
@@ -41,6 +41,7 @@ export async function register({ email, password, firstName, lastName, phone }) 
       firstName,
       lastName,
       phone,
+      dateOfBirth: new Date(dateOfBirth + 'T00:00:00Z'),
       emailVerifyTokenHash: hashToken(emailVerifyToken),
       emailVerifyTokenExpires: new Date(Date.now() + EMAIL_VERIFY_EXPIRES_HOURS * 60 * 60 * 1000),
     },

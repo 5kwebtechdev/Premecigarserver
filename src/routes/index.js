@@ -15,6 +15,7 @@ import paymentRoutes from '../modules/payments/payment.routes.js';
 import inventoryRoutes from '../modules/inventory/inventory.routes.js';
 import eventRoutes from '../modules/events/event.routes.js';
 import couponRoutes from '../modules/coupons/coupon.routes.js';
+import contactRoutes from '../modules/contact/contact.routes.js';
 import uploadRoutes from '../modules/uploads/upload.routes.js';
 import adminDashboardRoutes from '../modules/admin/dashboard/dashboard.routes.js';
 
@@ -37,6 +38,7 @@ router.use('/inventory', inventoryRoutes);
 router.use('/events', eventRoutes);
 router.use('/coupons', couponRoutes);
 router.use('/uploads', uploadRoutes);
+router.use('/contact', contactRoutes);
 router.use('/admin/dashboard', adminDashboardRoutes);
 
 // Dev-only: trigger the cron jobs on demand so the monthly-billing loop can be

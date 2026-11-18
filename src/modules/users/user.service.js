@@ -2,7 +2,7 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '../../config/db.js';
 import { ApiError } from '../../utils/ApiError.js';
 import { parsePagination, paginatedResponse } from '../../utils/pagination.js';
-import { revokeAllRefreshTokensForUser } from '../auth/token.util.js';
+import { revokeAllRefreshTokensForUser, issueRefreshToken } from '../auth/token.util.js';
 
 const PASSWORD_SALT_ROUNDS = 12;
 
@@ -13,6 +13,8 @@ const PUBLIC_USER_FIELDS = {
   lastName: true,
   phone: true,
   avatarUrl: true,
+  dateOfBirth: true,
+  emailPreferences: true,
   role: true,
   emailVerified: true,
   isActive: true,
@@ -25,12 +27,18 @@ export async function getById(id) {
   return user;
 }
 
-export async function updateProfile(id, data) {
+export async function updateProfile(id, { dateOfBirth, ...data }) {
+  if (dateOfBirth) {
+    const current = await prisma.user.findUnique({ where: { id }, select: { dateOfBirth: true } });
+    if (current?.dateOfBirth) throw ApiError.badRequest("Your date of birth can't be changed");
+    data.dateOfBirth = new Date(dateOfBirth + 'T00:00:00Z');
+  }
   return prisma.user.update({ where: { id }, data, select: PUBLIC_USER_FIELDS });
 }
 
 // Self-service password change. Verifies the current password, then (like a
 // reset) revokes every outstanding session so other devices are logged out.
+// Returns a fresh refresh token so the device that changed the password stays signed in.
 export async function changePassword(id, { currentPassword, newPassword }) {
   const user = await prisma.user.findUnique({ where: { id } });
   if (!user) throw ApiError.notFound('User not found');
@@ -41,6 +49,7 @@ export async function changePassword(id, { currentPassword, newPassword }) {
   const passwordHash = await bcrypt.hash(newPassword, PASSWORD_SALT_ROUNDS);
   await prisma.user.update({ where: { id }, data: { passwordHash } });
   await revokeAllRefreshTokensForUser(id);
+  return issueRefreshToken(id);
 }
 
 // Admin-only listing.

@@ -1,4 +1,6 @@
 import { asyncHandler } from '../../utils/asyncHandler.js';
+import { env } from '../../config/env.js';
+import { refreshCookieOptions } from '../auth/token.util.js';
 import * as userService from './user.service.js';
 
 export const getMe = asyncHandler(async (req, res) => {
@@ -12,8 +14,11 @@ export const updateMe = asyncHandler(async (req, res) => {
 });
 
 export const changePassword = asyncHandler(async (req, res) => {
-  await userService.changePassword(req.user.id, req.body);
-  res.json({ message: 'Password updated. Please sign in again on your other devices.' });
+  const { rawToken, expiresAt } = await userService.changePassword(req.user.id, req.body);
+  // Other devices are signed out; this one gets a fresh session cookie so it stays logged in.
+  const cookieName = req.get('x-client-app') === 'admin' ? env.adminRefreshTokenCookieName : env.refreshTokenCookieName;
+  res.cookie(cookieName, rawToken, refreshCookieOptions(expiresAt));
+  res.json({ message: 'Password updated. Other devices have been signed out.' });
 });
 
 // Admin: list all users.

@@ -41,6 +41,8 @@ export const env = {
       : Number(process.env.SMTP_PORT || 587) === 465,
   mailFrom: process.env.MAIL_FROM || 'S.PREME Cigar Co. <no-reply@spremecigar.com>',
   mailReplyTo: process.env.MAIL_REPLY_TO || '',
+  // Where the Contact Us form is delivered. Defaults to the SMTP mailbox itself.
+  contactEmail: process.env.CONTACT_EMAIL || process.env.SMTP_USER || '',
 
   webAppUrl: process.env.WEB_APP_URL || 'http://localhost:5173',
   // Public origin of this API — used to build absolute URLs for uploaded files.
