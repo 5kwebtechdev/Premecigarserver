@@ -595,7 +595,20 @@ export async function list({ page, limit, status, search, period, upgrade }) {
     prisma.subscription.count({ where }),
   ]);
 
-  return paginatedResponse({ items: await withPendingPlans(items), total, page: pagination.page, limit: pagination.limit });
+  // Members who have upgraded: attach their latest upgrade so admins can see it in the list.
+  const upgrades = items.length
+    ? await prisma.subscriptionPayment.findMany({
+        where: { subscriptionId: { in: items.map((s) => s.id) }, kind: 'UPGRADE', status: SUBSCRIPTION_PAYMENT_STATUS.SUCCEEDED },
+        orderBy: { createdAt: 'desc' },
+        select: { subscriptionId: true, description: true, amount: true, createdAt: true },
+      })
+    : [];
+  const withUpgrades = (await withPendingPlans(items)).map((s) => {
+    const mine = upgrades.filter((u) => u.subscriptionId === s.id);
+    return { ...s, upgradeCount: mine.length, lastUpgrade: mine[0] ?? null };
+  });
+
+  return paginatedResponse({ items: withUpgrades, total, page: pagination.page, limit: pagination.limit });
 }
 
 export async function getById(id) {
