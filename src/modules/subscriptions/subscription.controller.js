@@ -11,6 +11,18 @@ export const signupIntent = asyncHandler(async (req, res) => {
   res.json(await subscriptionService.createSignupIntent(req.user.id, req.body.planId));
 });
 
+export const upgradeIntent = asyncHandler(async (req, res) => {
+  res.json(await subscriptionService.createUpgradeIntent(Number(req.params.id), req.user.id, req.body.planId));
+});
+
+export const upgrade = asyncHandler(async (req, res) => {
+  res.json({ subscription: await subscriptionService.upgrade(Number(req.params.id), req.user.id, req.body) });
+});
+
+export const cancelPendingUpgrade = asyncHandler(async (req, res) => {
+  res.json({ subscription: await subscriptionService.cancelPendingUpgrade(Number(req.params.id), req.user.id) });
+});
+
 export const listMine = asyncHandler(async (req, res) => {
   res.json(await subscriptionService.listMine(req.user.id));
 });

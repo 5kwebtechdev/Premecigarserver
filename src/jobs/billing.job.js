@@ -85,7 +85,18 @@ async function autoResumePaused(now) {
 }
 
 async function billOne(sub, now) {
-  const { plan } = sub;
+  let { plan } = sub;
+  // A scheduled upgrade takes effect on this renewal: charge the new plan's full price.
+  let upgradingTo = null;
+  if (sub.pendingPlanId && !sub.skipNextCycle) {
+    const next = await prisma.membershipPlan.findUnique({ where: { id: sub.pendingPlanId } });
+    if (next?.isActive) {
+      plan = next;
+      upgradingTo = next;
+    } else {
+      await prisma.subscription.update({ where: { id: sub.id }, data: { pendingPlanId: null } });
+    }
+  }
   const periodStart = sub.nextBillingDate ?? now;
   const nextBillingDate = computeNextBillingDate(periodStart, plan.billingFrequency);
 
@@ -148,6 +159,7 @@ async function billOne(sub, now) {
         where: { id: sub.id },
         data: {
           status: SUBSCRIPTION_STATUS.ACTIVE,
+          ...(upgradingTo ? { planId: upgradingTo.id, pendingPlanId: null } : {}),
           failedPaymentCount: 0,
           lastPaymentAt: now,
           currentPeriodStart: periodStart,

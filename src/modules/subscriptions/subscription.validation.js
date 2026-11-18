@@ -84,3 +84,18 @@ export const updateSubscriptionSchema = z.object({
       message: 'Nothing to update',
     }),
 });
+
+export const upgradeIntentSchema = z.object({
+  params: z.object({ id: z.coerce.number().int().positive() }),
+  body: z.object({ planId: z.coerce.number().int().positive() }),
+});
+
+export const upgradeSchema = z.object({
+  params: z.object({ id: z.coerce.number().int().positive() }),
+  body: z.object({
+    planId: z.coerce.number().int().positive(),
+    // now: pay the full new price today and start today. next_cycle: switch (and pay) at the next billing date.
+    when: z.enum(['now', 'next_cycle']),
+    paymentIntentId: z.string().min(1).max(255).optional(),
+  }),
+});

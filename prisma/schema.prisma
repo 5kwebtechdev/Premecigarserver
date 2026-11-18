@@ -227,6 +227,8 @@ model Subscription {
   // Self-service + dunning state.
   pausedUntil        DateTime?
   skipNextCycle      Boolean   @default(false)
+  // An upgrade the member scheduled to start at the next billing date.
+  pendingPlanId      Int?
   failedPaymentCount Int       @default(0)
   lastPaymentAt      DateTime?
 

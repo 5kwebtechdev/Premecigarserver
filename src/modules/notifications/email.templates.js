@@ -273,3 +273,26 @@ Order #${order.id}
 ${url}`,
   };
 }
+
+// ── Subscription upgrade ─────────────────────────────────
+export function subscriptionUpgradeEmail({ user, fromPlan, toPlan, amount, startsOn, immediate }) {
+  const name = user.firstName ? escapeHtml(user.firstName) : 'there';
+  const lead = immediate
+    ? `Your membership is now <strong>${escapeHtml(toPlan.name)}</strong>. We charged <strong>${money(amount)}</strong> today and your next charge is on <strong>${formatDate(startsOn)}</strong>.`
+    : `Your upgrade from ${escapeHtml(fromPlan.name)} to <strong>${escapeHtml(toPlan.name)}</strong> is scheduled. It starts on <strong>${formatDate(startsOn)}</strong>, when <strong>${money(amount)}</strong> will be charged.`;
+  const bodyHtml = `
+    <p style="margin:0 0 14px;">Hi ${name},</p>
+    <p style="margin:0;">${lead}</p>`;
+  return {
+    subject: immediate ? `You're now on ${toPlan.name}` : `Your upgrade to ${toPlan.name} is scheduled`,
+    html: renderLayout({
+      previewText: immediate ? `Welcome to ${toPlan.name}.` : `Upgrade to ${toPlan.name} scheduled.`,
+      heading: immediate ? 'Membership upgraded' : 'Upgrade scheduled',
+      bodyHtml,
+      cta: { label: 'Manage my membership', url: `${BRAND.web}/subscriptions` },
+    }),
+    text: immediate
+      ? `Hi ${user.firstName || 'there'},\n\nYour membership is now ${toPlan.name}. Charged ${money(amount)} today; next charge ${formatDate(startsOn)}.`
+      : `Hi ${user.firstName || 'there'},\n\nYour upgrade to ${toPlan.name} starts ${formatDate(startsOn)} (${money(amount)} will be charged).`,
+  };
+}

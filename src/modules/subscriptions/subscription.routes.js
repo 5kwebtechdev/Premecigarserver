@@ -12,6 +12,8 @@ import {
   pauseSchema,
   cancelSchema,
   updateSubscriptionSchema,
+  upgradeIntentSchema,
+  upgradeSchema,
 } from './subscription.validation.js';
 
 const router = Router();
@@ -26,6 +28,9 @@ router.get('/metrics', authorize(...ADMIN_ROLES), subscriptionController.metrics
 router.post('/intent', validate(signupIntentSchema), subscriptionController.signupIntent);
 router.post('/', validate(subscribeSchema), subscriptionController.subscribe);
 router.get('/me', subscriptionController.listMine);
+router.post('/:id/upgrade/intent', validate(upgradeIntentSchema), subscriptionController.upgradeIntent);
+router.post('/:id/upgrade', validate(upgradeSchema), subscriptionController.upgrade);
+router.delete('/:id/upgrade', validate(idParamSchema), subscriptionController.cancelPendingUpgrade);
 router.get('/me/:id', validate(idParamSchema), subscriptionController.getMine);
 
 // ── Admin: list / detail ──────────────────────────────────

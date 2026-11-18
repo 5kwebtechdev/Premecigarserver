@@ -14,7 +14,7 @@ import {
   NOTIFICATION_TYPE,
 } from '../../config/constants.js';
 import { notify } from '../notifications/notification.service.js';
-import { subscriptionWelcomeEmail } from '../notifications/email.templates.js';
+import { subscriptionWelcomeEmail, subscriptionUpgradeEmail } from '../notifications/email.templates.js';
 import * as addressService from '../addresses/address.service.js';
 import { membershipPaymentProvider as paymentProvider, stripeEnabled } from '../payments/providers/index.js';
 import { env } from '../../config/env.js';
@@ -242,13 +242,21 @@ function shapeCustomer(subscription) {
   };
 }
 
+// Adds the plan an upgrade is scheduled for (if any) so the customer can see it.
+async function withPendingPlans(subs) {
+  const ids = [...new Set(subs.map((s) => s.pendingPlanId).filter(Boolean))];
+  const plans = ids.length ? await prisma.membershipPlan.findMany({ where: { id: { in: ids } } }) : [];
+  const byId = new Map(plans.map((pl) => [pl.id, pl]));
+  return subs.map((s) => ({ ...s, pendingPlan: s.pendingPlanId ? byId.get(s.pendingPlanId) ?? null : null }));
+}
+
 export async function listMine(userId) {
   const items = await prisma.subscription.findMany({
     where: { userId },
     orderBy: { createdAt: 'desc' },
     include: customerSubscriptionInclude,
   });
-  return { items: items.map(shapeCustomer) };
+  return { items: (await withPendingPlans(items)).map(shapeCustomer) };
 }
 
 export async function getMine(id, userId) {
@@ -259,7 +267,151 @@ export async function getMine(id, userId) {
       select: { id: true, type: true, status: true, total: true, placedAt: true, trackingNumber: true },
     },
   });
-  return shapeCustomer(subscription);
+  return shapeCustomer((await withPendingPlans([subscription]))[0]);
+}
+
+// ─────────────────────────────────────────────────────────
+// Customer: upgrade to a higher plan
+// ─────────────────────────────────────────────────────────
+// Pay the new plan's FULL price (no proration), either today (the new plan and
+// billing cycle start now) or at the next billing date (scheduled, paid then).
+async function loadUpgrade(subscriptionId, userId, planId) {
+  const subscription = await loadForActor(subscriptionId, { id: userId, role: ROLES.CUSTOMER });
+  if (subscription.status !== SUBSCRIPTION_STATUS.ACTIVE) {
+    throw ApiError.badRequest('Only an active membership can be upgraded');
+  }
+  const plan = await prisma.membershipPlan.findUnique({ where: { id: planId } });
+  if (!plan || !plan.isActive) throw ApiError.badRequest('That plan is not available');
+  if (plan.id === subscription.planId) throw ApiError.badRequest('You are already on this plan');
+  if (monthlyEquivalentPrice(plan) <= monthlyEquivalentPrice(subscription.plan)) {
+    throw ApiError.badRequest('You can only upgrade to a higher plan');
+  }
+  return { subscription, plan };
+}
+
+export async function createUpgradeIntent(subscriptionId, userId, planId) {
+  if (!stripeEnabled) throw ApiError.badRequest('Online card payments are not enabled');
+  const { plan } = await loadUpgrade(subscriptionId, userId, planId);
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user.stripeCustomerId) throw ApiError.badRequest('No payment method on file');
+  const { clientSecret, paymentIntentId } = await paymentProvider.createSignupIntent(
+    Math.round(Number(plan.price) * 100),
+    user.stripeCustomerId,
+    { kind: 'subscription_upgrade', userId, subscriptionId, planId: plan.id }
+  );
+  return { clientSecret, paymentIntentId, amount: Number(plan.price) };
+}
+
+export async function upgrade(subscriptionId, userId, { planId, when, paymentIntentId }) {
+  const { subscription, plan } = await loadUpgrade(subscriptionId, userId, planId);
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  const fromPlan = subscription.plan;
+
+  // ── Scheduled: switch (and charge) at the next billing date ──
+  if (when === 'next_cycle') {
+    await prisma.subscription.update({ where: { id: subscriptionId }, data: { pendingPlanId: plan.id } });
+    const mail = subscriptionUpgradeEmail({
+      user,
+      fromPlan,
+      toPlan: plan,
+      amount: Number(plan.price),
+      startsOn: subscription.nextBillingDate,
+      immediate: false,
+    });
+    await notify({
+      userId,
+      type: NOTIFICATION_TYPE.SUBSCRIPTION_UPGRADED,
+      to: user.email,
+      subject: mail.subject,
+      html: mail.html,
+      text: mail.text,
+    }).catch((err) => logger.error('[subscriptions] upgrade-scheduled email failed', err));
+    return getMine(subscriptionId, userId);
+  }
+
+  // ── Immediate: full payment today, new plan + new billing cycle from today ──
+  const amount = Number(plan.price);
+  let charge;
+  let paymentMethodLabel = subscription.paymentMethodLabel;
+  if (stripeEnabled) {
+    if (!paymentIntentId) throw ApiError.badRequest('Payment is required to upgrade');
+    if (!user.stripeCustomerId) throw ApiError.badRequest('No payment method on file');
+    try {
+      const verified = await paymentProvider.verifySignupIntent(paymentIntentId, {
+        providerCustomerId: user.stripeCustomerId,
+        amountCents: Math.round(amount * 100),
+        metadata: { kind: 'subscription_upgrade', userId, subscriptionId, planId: plan.id },
+      });
+      charge = { success: true, providerRef: verified.providerRef };
+      paymentMethodLabel = verified.paymentMethodLabel ?? paymentMethodLabel;
+    } catch (err) {
+      logger.warn(`[subscriptions] upgrade verification failed for user ${userId}: ${err.message}`);
+      throw ApiError.badRequest('We could not confirm your payment. Please try again.');
+    }
+    const reused = await prisma.subscriptionPayment.findFirst({ where: { providerRef: charge.providerRef } });
+    if (reused) throw ApiError.conflict('That payment has already been used');
+  } else {
+    charge = await paymentProvider.charge(Math.round(amount * 100), subscription.providerCustomerId ?? 'cus_stub', {
+      kind: 'subscription_upgrade',
+      userId,
+      idempotencyKey: `upgrade_${subscriptionId}_${plan.id}_${Date.now()}`,
+    });
+    if (!charge.success) throw ApiError.badRequest('Your payment was declined. Please try again.');
+  }
+
+  const now = new Date();
+  const nextBillingDate = computeNextBillingDate(now, plan.billingFrequency);
+  await prisma.$transaction(async (tx) => {
+    const subPayment = await tx.subscriptionPayment.create({
+      data: {
+        subscriptionId,
+        amount,
+        status: SUBSCRIPTION_PAYMENT_STATUS.SUCCEEDED,
+        attemptNumber: 1,
+        providerRef: charge.providerRef,
+      },
+    });
+    await tx.payment.create({
+      data: {
+        subscriptionPaymentId: subPayment.id,
+        provider: paymentProvider.name,
+        providerRef: charge.providerRef,
+        amount,
+        status: PAYMENT_STATUS.SUCCEEDED,
+      },
+    });
+    await tx.subscription.update({
+      where: { id: subscriptionId },
+      data: {
+        planId: plan.id,
+        pendingPlanId: null,
+        paymentMethodLabel,
+        failedPaymentCount: 0,
+        lastPaymentAt: now,
+        currentPeriodStart: now,
+        currentPeriodEnd: nextBillingDate,
+        nextBillingDate,
+      },
+    });
+  });
+
+  const mail = subscriptionUpgradeEmail({ user, fromPlan, toPlan: plan, amount, startsOn: nextBillingDate, immediate: true });
+  await notify({
+    userId,
+    type: NOTIFICATION_TYPE.SUBSCRIPTION_UPGRADED,
+    to: user.email,
+    subject: mail.subject,
+    html: mail.html,
+    text: mail.text,
+  }).catch((err) => logger.error('[subscriptions] upgrade email failed', err));
+
+  return getMine(subscriptionId, userId);
+}
+
+export async function cancelPendingUpgrade(subscriptionId, userId) {
+  const subscription = await loadForActor(subscriptionId, { id: userId, role: ROLES.CUSTOMER });
+  await prisma.subscription.update({ where: { id: subscription.id }, data: { pendingPlanId: null } });
+  return getMine(subscriptionId, userId);
 }
 
 // ─────────────────────────────────────────────────────────
@@ -350,6 +502,7 @@ export async function update(id, actingUser, { shippingAddressId, planId }) {
   }
 
   if (planId !== undefined && planId !== subscription.planId) {
+    if (!isAdmin(actingUser)) throw ApiError.forbidden('Use Upgrade Plan to change your membership');
     const plan = await prisma.membershipPlan.findUnique({ where: { id: Number(planId) } });
     if (!plan || !plan.isActive) {
       throw ApiError.badRequest('That plan is not available');
