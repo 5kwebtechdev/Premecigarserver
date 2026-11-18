@@ -34,11 +34,15 @@ const includeProducts = {
 
 // Members can only buy on the event's date: from the start of the day it
 // begins until its end time (or the end of that same day when no end is set).
+// Event times are entered as Kuwait time (UTC+3), so "the day" is the Kuwait day.
+const KUWAIT_OFFSET_MS = 3 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 export function saleWindow(event) {
-  const start = new Date(event.startAt);
-  start.setHours(0, 0, 0, 0);
-  const end = event.endAt ? new Date(event.endAt) : new Date(event.startAt);
-  if (!event.endAt) end.setHours(23, 59, 59, 999);
+  const startMs = new Date(event.startAt).getTime();
+  const dayStart = Math.floor((startMs + KUWAIT_OFFSET_MS) / DAY_MS) * DAY_MS - KUWAIT_OFFSET_MS;
+  const start = new Date(dayStart);
+  const end = event.endAt ? new Date(event.endAt) : new Date(dayStart + DAY_MS - 1);
   return { start, end };
 }
 

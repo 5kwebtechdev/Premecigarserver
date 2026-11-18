@@ -2,6 +2,11 @@ import { prisma } from '../../../config/db.js';
 import { SUBSCRIPTION_STATUS, SUBSCRIPTION_PAYMENT_STATUS, ORDER_TYPE, ORDER_STATUS } from '../../../config/constants.js';
 import { monthlyEquivalentPrice } from '../../subscriptions/subscription.lifecycle.js';
 
+const REVENUE_WHERE = {
+  type: ORDER_TYPE.ONE_TIME,
+  status: { in: [ORDER_STATUS.PAID, ORDER_STATUS.PROCESSING, ORDER_STATUS.SHIPPED, ORDER_STATUS.DELIVERED] },
+};
+
 export async function getMetrics() {
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
@@ -14,7 +19,6 @@ export async function getMetrics() {
     totalCustomers,
     ordersToday,
     totalOrders,
-    subscriptionShipmentsThisMonth,
     activeSubscriptions,
     pausedSubscriptions,
     pastDueSubscriptions,
@@ -25,11 +29,12 @@ export async function getMetrics() {
     subscriptionRevenueAgg,
     totalProducts,
     inventoryRows,
+    revenueMonthAgg,
+    revenueTotalAgg,
   ] = await Promise.all([
     prisma.user.count({ where: { role: 'CUSTOMER' } }),
     prisma.order.count({ where: { placedAt: { gte: startOfToday } } }),
     prisma.order.count(),
-    prisma.order.count({ where: { type: ORDER_TYPE.SUBSCRIPTION, placedAt: { gte: startOfMonth } } }),
     prisma.subscription.count({ where: { status: SUBSCRIPTION_STATUS.ACTIVE } }),
     prisma.subscription.count({ where: { status: SUBSCRIPTION_STATUS.PAUSED } }),
     prisma.subscription.count({ where: { status: SUBSCRIPTION_STATUS.PAST_DUE } }),
@@ -42,7 +47,7 @@ export async function getMetrics() {
     }),
     prisma.subscription.findMany({
       where: { status: SUBSCRIPTION_STATUS.ACTIVE },
-      select: { plan: { select: { price: true, billingFrequency: true } } },
+      select: { plan: { select: { id: true, name: true, price: true, billingFrequency: true } } },
     }),
     prisma.subscriptionPayment.aggregate({
       _sum: { amount: true },
@@ -50,6 +55,9 @@ export async function getMetrics() {
     }),
     prisma.product.count({ where: { isActive: true } }),
     prisma.inventory.findMany({ select: { stockQty: true, lowStockThreshold: true } }),
+    // Product sales revenue: paid orders that haven't been cancelled / refunded / failed.
+    prisma.order.aggregate({ _sum: { total: true }, where: { ...REVENUE_WHERE, placedAt: { gte: startOfMonth } } }),
+    prisma.order.aggregate({ _sum: { total: true }, where: REVENUE_WHERE }),
   ]);
 
   const lowStockCount = inventoryRows.filter((i) => i.stockQty <= i.lowStockThreshold).length;
@@ -57,11 +65,25 @@ export async function getMetrics() {
     activePlanPrices.reduce((sum, s) => sum + monthlyEquivalentPrice(s.plan), 0).toFixed(2)
   );
 
+  // MRR per plan, biggest first.
+  const byPlan = new Map();
+  for (const s of activePlanPrices) {
+    const row = byPlan.get(s.plan.id) ?? { planId: s.plan.id, name: s.plan.name, subscribers: 0, mrr: 0 };
+    row.subscribers += 1;
+    row.mrr += monthlyEquivalentPrice(s.plan);
+    byPlan.set(s.plan.id, row);
+  }
+  const mrrByPlan = [...byPlan.values()]
+    .map((r) => ({ ...r, mrr: Number(r.mrr.toFixed(2)) }))
+    .sort((a, b) => b.mrr - a.mrr);
+
   return {
+    mrrByPlan,
+    salesRevenueThisMonth: Number(revenueMonthAgg._sum.total ?? 0),
+    salesRevenueTotal: Number(revenueTotalAgg._sum.total ?? 0),
     totalCustomers,
     ordersToday,
     totalOrders,
-    subscriptionShipmentsThisMonth,
     activeSubscriptions,
     pausedSubscriptions,
     pastDueSubscriptions,
