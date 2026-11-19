@@ -1,3 +1,4 @@
+import { orderCode } from '../../utils/orderCode.js';
 import { env } from '../../config/env.js';
 
 // ─────────────────────────────────────────────────────────
@@ -163,7 +164,7 @@ export function orderConfirmationEmail({ user, order, lines, total }) {
   const bodyHtml = `
     <p style="margin:0 0 14px;">Hi ${name},</p>
     <p style="margin:0 0 4px;">Thanks for your order. We've received payment and it's being prepared.</p>
-    <p style="margin:0 0 8px;font-size:14px;color:${BRAND.muted};">Order #${escapeHtml(order.id)}</p>
+    <p style="margin:0 0 8px;font-size:14px;color:${BRAND.muted};">Order ${escapeHtml(orderCode(order.id))}</p>
     ${lineItemsTable(lines)}
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
       <tr>
@@ -173,15 +174,15 @@ export function orderConfirmationEmail({ user, order, lines, total }) {
     </table>
     <p style="margin:16px 0 0;">Free shipping — arrives in about 5–8 business days.</p>`;
   return {
-    subject: `Your ${BRAND.name} order #${order.id} is confirmed`,
+    subject: `Your ${BRAND.name} order ${orderCode(order.id)} is confirmed`,
     html: renderLayout({
-      previewText: `Order #${order.id} confirmed — ${money(total)}`,
+      previewText: `Order ${orderCode(order.id)} confirmed — ${money(total)}`,
       heading: 'Order confirmed',
       bodyHtml,
       cta: { label: 'View your order', url: `${BRAND.web}/orders/${order.id}` },
     }),
     text:
-      `Hi ${user.firstName || 'there'},\n\nOrder #${order.id} confirmed.\n\n` +
+      `Hi ${user.firstName || 'there'},\n\nOrder ${orderCode(order.id)} confirmed.\n\n` +
       lines.map((l) => `  ${l.quantity} x ${l.name}  ${money(l.lineTotal ?? l.unitPrice * l.quantity)}`).join('\n') +
       `\n\nTotal charged: ${money(total)}\nFree shipping, arrives in ~5-8 business days.\n\n${BRAND.web}/orders/${order.id}`,
   };
@@ -227,17 +228,17 @@ export function orderStatusEmail({ user, order, status, trackingNumber, refunded
   const url = `${BRAND.web}/orders/${order.id}`;
   const copy = {
     SHIPPED: {
-      subject: `Your ${BRAND.name} order #${order.id} has shipped`,
+      subject: `Your ${BRAND.name} order ${orderCode(order.id)} has shipped`,
       heading: 'Your order is on its way',
       line: 'Good news - your order has shipped.',
     },
     DELIVERED: {
-      subject: `Your ${BRAND.name} order #${order.id} was delivered`,
+      subject: `Your ${BRAND.name} order ${orderCode(order.id)} was delivered`,
       heading: 'Order delivered',
       line: 'Your order has been delivered. We hope you enjoy it.',
     },
     CANCELLED: {
-      subject: `Your ${BRAND.name} order #${order.id} was cancelled`,
+      subject: `Your ${BRAND.name} order ${orderCode(order.id)} was cancelled`,
       heading: 'Order cancelled',
       line: refunded
         ? 'Your order has been cancelled and your payment is being refunded to your original payment method (allow 5-10 business days).'
@@ -251,7 +252,7 @@ export function orderStatusEmail({ user, order, status, trackingNumber, refunded
   const bodyHtml = `
     <p style="margin:0 0 14px;">Hi ${name},</p>
     <p style="margin:0 0 4px;">${escapeHtml(copy.line)}</p>
-    <p style="margin:0;font-size:14px;color:${BRAND.muted};">Order #${escapeHtml(order.id)}</p>
+    <p style="margin:0;font-size:14px;color:${BRAND.muted};">Order ${escapeHtml(orderCode(order.id))}</p>
     ${tracking}`;
   return {
     subject: copy.subject,
@@ -265,7 +266,7 @@ export function orderStatusEmail({ user, order, status, trackingNumber, refunded
       `Hi ${user.firstName || 'there'},
 
 ${copy.line}
-Order #${order.id}
+Order ${orderCode(order.id)}
 ` +
       (status === 'SHIPPED' && trackingNumber ? `Tracking number: ${trackingNumber}
 ` : '') +
