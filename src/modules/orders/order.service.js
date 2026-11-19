@@ -1,3 +1,4 @@
+import { rangeStart } from '../../utils/dateRange.js';
 import { orderStatusEmail } from '../notifications/email.templates.js';
 import * as couponService from '../coupons/coupon.service.js';
 import { prisma } from '../../config/db.js';
@@ -35,6 +36,7 @@ const includeDefault = {
   shippingAddress: true,
   billingAddress: true,
   subscription: { select: { id: true, plan: { select: { name: true } } } },
+  event: { select: { id: true, title: true } },
 };
 
 // ─────────────────────────────────────────────────────────
@@ -58,6 +60,7 @@ export async function listMine(userId, { page, limit, status }) {
           include: { product: { select: { id: true, name: true, slug: true, images: { orderBy: { sortOrder: 'asc' }, take: 1 } } } },
         },
         subscription: { select: { id: true, plan: { select: { name: true } } } },
+        event: { select: { id: true, title: true } },
       },
     }),
     prisma.order.count({ where }),
@@ -192,6 +195,9 @@ async function prepareCart(userId, dto) {
   // Optional coupon, validated for this user against the server-computed subtotal.
   let coupon = null;
   let discount = 0;
+  if (dto.couponCode && event) {
+    throw ApiError.badRequest("Coupons can't be used on event purchases - they apply to direct purchases only");
+  }
   if (dto.couponCode) {
     ({ coupon, discount } = await couponService.evaluate(userId, dto.couponCode, subtotal));
   }
@@ -370,8 +376,9 @@ export async function checkout(userId, dto) {
   return { order: created };
 }
 
-export async function list({ page, limit, status, period }) {
+export async function list({ page, limit, status, period, range }) {
   const pagination = parsePagination({ page, limit });
+  const since = rangeStart(range);
   const monthStart = new Date();
   monthStart.setDate(1);
   monthStart.setHours(0, 0, 0, 0);
@@ -385,6 +392,7 @@ export async function list({ page, limit, status, period }) {
           { statusHistory: { some: { status: ORDER_STATUS.CANCELLED, changedAt: { gte: monthStart } } } }
         : { placedAt: { gte: monthStart } }
       : {}),
+    ...(since && !(period === 'month' && status !== ORDER_STATUS.CANCELLED) ? { placedAt: { gte: since } } : {}),
   };
 
   const [items, total] = await Promise.all([
@@ -393,7 +401,7 @@ export async function list({ page, limit, status, period }) {
       skip: pagination.skip,
       take: pagination.take,
       orderBy: { placedAt: 'desc' },
-      include: { user: { select: { id: true, email: true, firstName: true, lastName: true } }, items: true },
+      include: { user: { select: { id: true, email: true, firstName: true, lastName: true } }, items: true, event: { select: { id: true, title: true } } },
     }),
     prisma.order.count({ where }),
   ]);

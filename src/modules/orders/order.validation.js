@@ -102,6 +102,8 @@ export const listOrdersSchema = z.object({
     status: z.enum(ORDER_STATUSES).optional(),
     // 'month' = this month (cancelled this month when status=CANCELLED)
     period: z.enum(['month']).optional(),
+    // 1w | 1m | 6m | 1y - only orders placed within that time
+    range: z.enum(['1w', '1m', '6m', '1y']).optional(),
   }),
 });
 

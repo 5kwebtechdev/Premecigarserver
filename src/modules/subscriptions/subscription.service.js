@@ -1,3 +1,4 @@
+import { rangeStart } from '../../utils/dateRange.js';
 import { prisma } from '../../config/db.js';
 import { ApiError } from '../../utils/ApiError.js';
 import { parsePagination, paginatedResponse } from '../../utils/pagination.js';
@@ -559,14 +560,16 @@ async function notifySubscriber(subscription, type, { subject, body }) {
 // ─────────────────────────────────────────────────────────
 // Admin: list / detail / metrics
 // ─────────────────────────────────────────────────────────
-export async function list({ page, limit, status, search, period, upgrade }) {
+export async function list({ page, limit, status, search, period, upgrade, range }) {
   const pagination = parsePagination({ page, limit });
+  const since = rangeStart(range);
   const monthStart = new Date();
   monthStart.setDate(1);
   monthStart.setHours(0, 0, 0, 0);
   const where = {
     ...(status ? { status } : {}),
     ...(period === 'month' && status === SUBSCRIPTION_STATUS.CANCELLED ? { cancelledAt: { gte: monthStart } } : {}),
+    ...(since ? { createdAt: { gte: since } } : {}),
     ...(upgrade === 'scheduled' ? { pendingPlanId: { not: null }, status: SUBSCRIPTION_STATUS.ACTIVE } : {}),
     ...(search
       ? {

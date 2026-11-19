@@ -27,6 +27,8 @@ export const listSubscriptionsSchema = z.object({
     period: z.enum(['month']).optional(),
     // 'scheduled' = members who have an upgrade waiting for their next billing date
     upgrade: z.enum(['scheduled']).optional(),
+    // 1w | 1m | 6m | 1y - only memberships started within that time
+    range: z.enum(['1w', '1m', '6m', '1y']).optional(),
   }),
 });
 
